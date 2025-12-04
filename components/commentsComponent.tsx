@@ -43,7 +43,7 @@ interface CommentsComponentProps {
 
 /**
  * Función auxiliar para obtener el Access Token de SecureStore.
- * Importante: Aplica .trim() para limpiar posibles espacios en blanco que causan 401.
+ * Aplica .trim() para limpiar posibles espacios en blanco que causan 401.
  */
 async function getToken() {
     const rawToken = await SecureStore.getItemAsync('accessToken'); 
@@ -66,7 +66,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
 
   /**
    * Obtiene los comentarios del video.
-   * Utiliza el endpoint corregido y envía el token para obtener reacciones del usuario.
+   * Depende solo del videoId y del estado de refreshing.
    */
   const fetchComments = useCallback(async () => {
     // LOG de Depuración: ID del Video
@@ -78,7 +78,8 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
       return;
     }
 
-    if (comments.length === 0) {
+    // Si no estamos refrescando manualmente, mostramos el spinner de carga
+    if (!refreshing) {
         setLoading(true);
     }
     
@@ -94,9 +95,10 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
           }
       } : {};
 
+      // Endpoint: GET /comments/video/{videoId}
       const response = await axios.get(
-        `${API_URL}/comments/video/${videoId}?page=0&size=10`, // Endpoint corregido: /comments/video/{videoId}
-        config // Pasar la configuración con el token
+        `${API_URL}/comments/video/${videoId}?page=0&size=10`, 
+        config 
       );
       
       if (response && response.data) {
@@ -130,7 +132,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
       setLoading(false);
       setRefreshing(false);
     }
-  }, [videoId, comments.length]);
+  }, [videoId, refreshing]); // Depende del videoId y refreshing
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -138,10 +140,15 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
     fetchComments();
   }, [fetchComments]);
 
-  // Montaje y Recarga
+  // CORRECCIÓN CLAVE: useEffect para manejar el cambio de videoId
   useEffect(() => {
+    // 1. Limpia el estado y el error inmediatamente al cambiar el videoId
+    setComments([]);
+    setError(null);
+    
+    // 2. Ejecuta la búsqueda de comentarios
     fetchComments();
-  }, [videoId, fetchComments]);
+  }, [videoId, fetchComments]); // Depende del videoId y la función fetchComments
 
   // Manejo del Teclado
   useEffect(() => {
@@ -192,12 +199,13 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
       // LOG DE DEPURACIÓN
       console.log("AccessToken para handleSendComment:", token ? `Token encontrado (Longitud: ${token.length})` : "Token no encontrado");
 
+      // Endpoint: POST /comments/videos/{videoId}
       const response = await axios.post(
-        `${API_URL}/comments/videos/${videoId}`, // Endpoint de POST/creación
+        `${API_URL}/comments/videos/${videoId}`, 
         { content: trimmedComment },
         { 
             headers: { 
-                'Authorization': `Bearer ${token}` // Incluir el Access Token
+                'Authorization': `Bearer ${token}` 
             } 
         }
       );
@@ -215,6 +223,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
           userReaction: null
       };
 
+      // Agrega el nuevo comentario al inicio de la lista
       setComments(prev => [newCommentData, ...prev]);
       setNewComment('');
       Keyboard.dismiss();
@@ -274,7 +283,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
         
       // Llamada a la API para registrar la reacción
       await axios.post(
-        `${API_URL}/comments/${commentId}/react`,
+        `${API_URL}/comments/${commentId}/react`, // Endpoint: POST /comments/{commentId}/react
         { reaction },
         { 
             headers: { 
@@ -334,6 +343,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
     }
 
     // Manejo de estado de carga inicial
+    // Solo muestra el ActivityIndicator si no hay comentarios Y está cargando.
     if (loading && comments.length === 0 && !refreshing) {
         return (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'black' }}>
@@ -343,7 +353,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
         );
     }
 
-    // Manejo de estado de error inicial
+    // Manejo de estado de error inicial (si no se pudo cargar NADA)
     if (error && comments.length === 0) {
         return (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'black' }}>
@@ -389,7 +399,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
           />
         }
       >
-        {/* Muestra el error de 401 si hay comentarios */}
+        {/* Muestra el error si hay comentarios (ej: error 401 después de la carga inicial) */}
         {error && comments.length > 0 && (
           <View style={{ padding: 10, alignItems: 'center', backgroundColor: '#333' }}>
             <Text style={{ color: 'red' }}>{error}</Text>

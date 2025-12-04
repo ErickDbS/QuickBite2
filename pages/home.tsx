@@ -21,9 +21,13 @@ export default function Home({ navigation }: HomeScreenProps) {
 
     // Callback para recibir el ID del video actual de FYP
     const handleVideoSelect = useCallback((videoId: string | null) => {
-        // console.log('Video selected:', videoId); // Descomentar para debug
+        // Si el video cambia, cerramos el modal de comentarios
+        if (selectedVideoId !== videoId) {
+            setVisible(false);
+            translateY.setValue(height); // Asegurarse de que la animación se reinicie
+        }
         setSelectedVideoId(videoId);
-    }, []);
+    }, [selectedVideoId, height, translateY]);
 
     const openComments = useCallback(() => {
         if (!selectedVideoId) {

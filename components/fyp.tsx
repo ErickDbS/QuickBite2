@@ -7,27 +7,26 @@ import {
     Animated, 
     StyleSheet, 
     ActivityIndicator, 
-    Text 
+    Text,
+    RefreshControl,
+    TouchableOpacity 
 } from "react-native";
 import { Video, ResizeMode } from "expo-av";
 import { Ionicons } from "@expo/vector-icons";
 import { useIsFocused } from "@react-navigation/native";
 import axios from "axios";
 
-const { height } = Dimensions.get("window");
+const { height, width } = Dimensions.get("window"); // Obtenemos ancho y alto
 
-// Asegúrate de que esta interfaz coincida con la respuesta de tu API
 interface VideoItem {
   id: string;
   url: string;
-  // Añadir cualquier otra propiedad necesaria como 'creator', 'description', etc.
 }
 
 interface FYPProps {
   onVideoSelect?: (videoId: string | null) => void;
 }
 
-// Configuración de la visibilidad para la FlatList
 const viewabilityConfig = {
     itemVisiblePercentThreshold: 80,
     minimumViewTime: 300,
@@ -35,38 +34,36 @@ const viewabilityConfig = {
 
 export default function FYP({ onVideoSelect }: FYPProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
-    const videoRefs = useRef<(Video | null)[]>([]);
+    const videoRefs = useRef<(Video | null)[]>([]); 
     const [isPlaying, setIsPlaying] = useState(true);
     const isFocused = useIsFocused();
 
-    // Feed remoto
+    // Estado de datos
     const [data, setData] = useState<VideoItem[]>([]);
+    
+    // Referencia de datos para evitar clausuras obsoletas
+    const dataRef = useRef<VideoItem[]>([]);
+    useEffect(() => {
+        dataRef.current = data;
+    }, [data]);
+
     const [page, setPage] = useState(0);
     const PAGE_SIZE = 5;
-    // `loadingInitial` para el spinner grande en el centro
     const [loadingInitial, setLoadingInitial] = useState(true); 
-    // `loadingMore` para el spinner en el footer
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
     const BACKGROUND_REFRESH_MS = 30000;
     
-    // Animación de Play/Pause (manteniendo tu implementación original)
     const fadeAnim = useRef(new Animated.Value(0)).current;
 
     const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
-    if (!API_URL) {
-        console.error("Error: EXPO_PUBLIC_AWS_API_URL no está definido.");
-    }
 
+    // --- Lógica de Carga ---
     const loadMore = useCallback(async (isInitialLoad = false) => {
         if (!API_URL) return;
-
-        // Si es la carga inicial y ya tiene datos, no hacer nada a menos que se fuerce
         if (!isInitialLoad && !hasMore) return;
-
-        // Evitar múltiples cargas concurrentes
         if (loadingMore || refreshing) return;
 
         setLoadError(null);
@@ -85,10 +82,7 @@ export default function FYP({ onVideoSelect }: FYPProps) {
             const startingPage = isInitialLoad ? 1 : page + 1;
 
             setData(prev => {
-                // Si es una carga inicial forzada, reemplazar
                 if (isInitialLoad) return items;
-
-                // Carga normal: agregar solo los nuevos
                 const existing = new Set(prev.map((i: any) => i.id));
                 return [...prev, ...items.filter((i: any) => !existing.has(i.id))];
             });
@@ -97,15 +91,14 @@ export default function FYP({ onVideoSelect }: FYPProps) {
             if (items.length < PAGE_SIZE) setHasMore(false);
             else setHasMore(true);
 
-            // Si es la primera carga y hay videos, notificar al Home
             if (isInitialLoad && items.length > 0 && onVideoSelect) {
                 onVideoSelect(items[0].id);
             }
 
         } catch (e: any) {
             console.error("Error loading feed:", e?.message);
-            setLoadError("No se pudieron cargar los videos. Revisa tu conexión.");
-            setHasMore(false); // Detener la carga automática tras un error
+            setLoadError("Error cargando videos");
+            setHasMore(false);
         } finally {
             setLoadingInitial(false);
             setLoadingMore(false);
@@ -115,7 +108,6 @@ export default function FYP({ onVideoSelect }: FYPProps) {
     const refreshFeed = useCallback(async () => {
         if (!API_URL || refreshing) return;
         setRefreshing(true);
-        setLoadError(null);
         try {
             const res = await axios.get(`${API_URL}/videos/feed`, {
                 params: { page: 0, size: PAGE_SIZE },
@@ -124,15 +116,13 @@ export default function FYP({ onVideoSelect }: FYPProps) {
             setData(items);
             setPage(1);
             setHasMore(items.length >= PAGE_SIZE);
+            
             if (items.length > 0 && onVideoSelect) {
                 onVideoSelect(items[0].id);
             }
-            setCurrentIndex(0); // Volver al primer video
-            videoRefs.current.forEach(async (ref) => ref?.pauseAsync());
-
+            setCurrentIndex(0);
         } catch (e: any) {
-            console.error("Error refreshing feed:", e?.message);
-            setLoadError("Error al refrescar el feed.");
+            console.log("Error refreshing:", e?.message);
         } finally {
             setRefreshing(false);
         }
@@ -148,7 +138,6 @@ export default function FYP({ onVideoSelect }: FYPProps) {
             setData(prev => {
                 const ids = new Set(prev.map((i: any) => i.id));
                 const newOnes = items.filter((i: any) => !ids.has(i.id));
-                // Asegúrate de mantener el orden actual y solo agregar nuevos
                 return newOnes.length ? [...newOnes, ...prev] : prev;
             });
         } catch (e: any) {
@@ -156,153 +145,93 @@ export default function FYP({ onVideoSelect }: FYPProps) {
         }
     }, [API_URL, loadingMore, refreshing]);
 
-    // 1. Carga inicial
     useEffect(() => {
         loadMore(true);
-    }, []); // Solo se ejecuta una vez al montar
+    }, []);
 
-    // 2. Refresh en segundo plano
     useEffect(() => {
         if (!isFocused) return;
         const id = setInterval(backgroundRefresh, BACKGROUND_REFRESH_MS);
         return () => clearInterval(id);
     }, [isFocused, backgroundRefresh]);
 
-    // 3. Control de reproducción por foco y estado
+    // --- Control de Reproducción Centralizado ---
     useEffect(() => {
-        const currentVideoRef = videoRefs.current[currentIndex];
+        // 1. Pausar todos los que NO son el actual
+        videoRefs.current.forEach((video, index) => {
+            if (video && index !== currentIndex) {
+                video.pauseAsync();
+                // Opcional: si quieres que se reinicien al volver a verlos
+                // video.setPositionAsync(0); 
+            }
+        });
 
-        if (!isFocused) {
-            videoRefs.current.forEach((video) => video?.pauseAsync());
-        } else if (currentVideoRef) {
-            // Reproducir solo si el video está enfocado y `isPlaying` es true
-            if (isPlaying) {
-                 currentVideoRef.playAsync();
+        // 2. Manejar el video actual
+        const currentVideo = videoRefs.current[currentIndex];
+        if (currentVideo) {
+            if (isFocused && isPlaying) {
+                currentVideo.playAsync();
             } else {
-                 currentVideoRef.pauseAsync();
+                currentVideo.pauseAsync();
             }
         }
-    }, [isFocused, isPlaying, currentIndex]);
+    }, [isFocused, isPlaying, currentIndex, data]);
 
 
-    // 4. Manejo del cambio de video visible
-    const onViewableItemsChanged = useRef(async ({ viewableItems }: any) => {
+    // --- MANEJO DE VISTA ---
+    const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
         if (viewableItems.length > 0) {
             const newIndex = viewableItems[0].index;
             
-            // Pausar y resetear el video anterior, solo si hay cambio de índice
-            if (newIndex !== currentIndex) {
-                const previousVideo = videoRefs.current[currentIndex];
-                if (previousVideo) {
-                    // console.log(`Pausando video en index ${currentIndex}`);
-                    await previousVideo.pauseAsync();
-                    await previousVideo.setPositionAsync(0);
-                }
-            }
+            const currentData = dataRef.current;
+            const vid = currentData[newIndex]?.id;
 
-            // Actualizar el estado y notificar al Home
-            const vid = data[newIndex]?.id;
             if (vid && onVideoSelect) {
-                // console.log(`Nuevo video visible: ${vid}`);
                 onVideoSelect(vid);
             }
-            setCurrentIndex(newIndex);
-            setIsPlaying(true); // Siempre empieza a reproducir el nuevo video
 
-            // Reproducir el nuevo video
-            const currentVideo = videoRefs.current[newIndex];
-            if (currentVideo) {
-                await currentVideo.playAsync();
-            }
+            setCurrentIndex(newIndex);
+            setIsPlaying(true);
         }
-    });
+    }).current;
 
     const showIcon = () => {
         Animated.sequence([
-            Animated.timing(fadeAnim, {
-                toValue: 1,
-                duration: 150,
-                useNativeDriver: true,
-            }),
-            Animated.timing(fadeAnim, {
-                toValue: 0,
-                duration: 300,
-                delay: 500,
-                useNativeDriver: true,
-            }),
+            Animated.timing(fadeAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
+            Animated.timing(fadeAnim, { toValue: 0, duration: 300, delay: 500, useNativeDriver: true }),
         ]).start();
     };
 
     const handlePlayPause = async (index: number) => {
-        const currentVideo = videoRefs.current[index];
-        if (!currentVideo) return;
-
-        if (isPlaying) {
-            await currentVideo.pauseAsync();
-            setIsPlaying(false);
-        } else {
-            showIcon();
-            await currentVideo.playAsync();
-            setIsPlaying(true);
-        }
+        if (index !== currentIndex) return;
+        setIsPlaying(!isPlaying);
+        showIcon();
     };
 
+    // --- ESTILOS CORREGIDOS ---
     const styles = StyleSheet.create({
-        container: {
-            flex: 1,
-            backgroundColor: "black",
-        },
-        loadingContainer: {
-            flex: 1,
-            justifyContent: 'center',
+        container: { flex: 1, backgroundColor: "black" },
+        videoContainer: { 
+            height: height, 
+            width: width, // Ancho explícito
+            justifyContent: 'center', 
             alignItems: 'center',
-            backgroundColor: 'black',
+            backgroundColor: 'black' // Fondo negro explícito
+        },
+        video: { 
+            width: width, // Dimensiones explícitas
             height: height,
+            position: 'absolute', // Asegurar posición absoluta para cubrir
         },
-        errorText: {
-            color: 'red',
-            marginTop: 10,
-            textAlign: 'center',
-        },
-        videoContainer: {
-            height, 
-            width: "100%"
-        },
-        video: {
-            flex: 1,
-        },
-        controls: {
-            position: "absolute",
-            bottom: 20,
-            left: 20,
-            flexDirection: "row",
-            alignItems: "center",
-        },
+        controls: { position: "absolute", bottom: 20, left: 20, flexDirection: "row", alignItems: "center", zIndex: 10 },
+        centerIcon: { position: "absolute", top: "45%", left: "45%", zIndex: 10 },
+        loadingContainer: { flex: 1, backgroundColor: 'black', justifyContent: 'center', alignItems: 'center' }
     });
 
-    // --- Renderizado principal ---
     if (loadingInitial && data.length === 0) {
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#4CAF50" />
-                <Text style={{ color: 'white', marginTop: 10 }}>Cargando feed...</Text>
-                {loadError && <Text style={styles.errorText}>{loadError}</Text>}
-            </View>
-        );
-    }
-    
-    if (data.length === 0) {
-        return (
-            <View style={styles.loadingContainer}>
-                <Text style={{ color: 'gray', fontSize: 16 }}>
-                    No hay videos disponibles.
-                </Text>
-                {loadError && <Text style={styles.errorText}>{loadError}</Text>}
-                <TouchableWithoutFeedback onPress={() => loadMore(true)}>
-                    <Text style={{ color: '#4CAF50', marginTop: 15, fontSize: 16 }}>
-                        Tocar para Reintentar
-                    </Text>
-                </TouchableWithoutFeedback>
             </View>
         );
     }
@@ -315,38 +244,25 @@ export default function FYP({ onVideoSelect }: FYPProps) {
                     <TouchableWithoutFeedback onPress={() => handlePlayPause(index)}>
                         <View style={styles.videoContainer}>
                             <Video
-                                ref={(ref) => {
-                                    if (ref) videoRefs.current[index] = ref;
-                                }}
+                                ref={(ref) => { if (ref) videoRefs.current[index] = ref; }}
                                 source={{ uri: item.url }}
-                                style={styles.video}
-                                resizeMode={ResizeMode.COVER}
+                                style={styles.video} // Usando estilo con dimensiones fijas
+                                resizeMode={ResizeMode.COVER} // Importante para llenar pantalla
                                 isLooping
-                                // Solo reproducir si es el video actual Y la pantalla está enfocada Y el estado es isPlaying
-                                shouldPlay={index === currentIndex && isPlaying && isFocused}
-                                useNativeControls={false} 
-                                // Logs para debug de carga de videos
-                                // onLoadStart={() => console.log('Video Loading Start:', item.id)}
-                                // onLoad={() => console.log('Video Loaded:', item.id)}
-                                // onError={(e) => console.log('Video Error:', e)}
+                                shouldPlay={false} // Controlado por useEffect
+                                useNativeControls={false}
+                                // Añadir poster si es necesario para evitar parpadeo negro
+                                // posterSource={{ uri: 'loading_image_url' }}
                             />
 
-                            {/* Controles de Reproducción (tu diseño original) */}
                             <View style={styles.controls}>
-                                <TouchableWithoutFeedback onPress={() => handlePlayPause(index)}>
+                                <TouchableOpacity onPress={() => handlePlayPause(index)}>
                                     <Ionicons name={isPlaying ? "pause" : "play"} size={24} color="white" />
-                                </TouchableWithoutFeedback>
+                                </TouchableOpacity>
                             </View>
 
-                            {/* Icono de Pausa/Play en el centro */}
                             {index === currentIndex && !isPlaying && (
-                                <View
-                                    style={{
-                                        position: "absolute",
-                                        top: "45%",
-                                        left: "45%",
-                                    }}
-                                >
+                                <View style={styles.centerIcon}>
                                     <Ionicons name="play" size={64} color="white" />
                                 </View>
                             )}
@@ -360,22 +276,25 @@ export default function FYP({ onVideoSelect }: FYPProps) {
                 snapToInterval={height}
                 snapToAlignment="start"
                 
-                // Viewability Config
-                onViewableItemsChanged={onViewableItemsChanged.current}
+                // --- AJUSTES PARA SOLUCIONAR PANTALLA NEGRA ---
+                initialNumToRender={3}
+                windowSize={5}
+                maxToRenderPerBatch={3}
+                // IMPORTANTE: Cambiado a false para evitar que el video se descargue de la GPU
+                removeClippedSubviews={false} 
+                // ----------------------------------------------
+
+                onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfig}
                 
-                // Infinite Scroll
                 onEndReached={() => loadMore(false)}
-                onEndReachedThreshold={0.6}
+                onEndReachedThreshold={0.5}
                 
-                // Pull to Refresh
-                refreshing={refreshing}
-                onRefresh={refreshFeed}
-
-                // Footer para el loading
-                ListFooterComponent={loadingMore && data.length > 0 ? (
-                    <ActivityIndicator size="small" color="#4CAF50" style={{ marginVertical: 20 }} /> 
-                ) : null}
+                refreshControl={
+                    <RefreshControl refreshing={refreshing} onRefresh={refreshFeed} tintColor="#4CAF50" />
+                }
+                
+                ListFooterComponent={loadingMore ? <ActivityIndicator color="#4CAF50" /> : null}
             />
         </View>
     );
