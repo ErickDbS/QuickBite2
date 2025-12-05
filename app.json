@@ -18,6 +18,7 @@
 
       "infoPlist": {
         "NSCameraUsageDescription": "Necesitamos acceder a la cámara para grabar videos.",
+        "NSPhotoLibraryUsageDescription": "Permite que QuickBite acceda a tu galería para subir videos y fotos.",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
           "NSExceptionDomains": {

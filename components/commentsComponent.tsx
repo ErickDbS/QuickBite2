@@ -523,7 +523,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
                                   <View style={{ flex: 1 }}>
                                       <Text style={{ color: '#ccc', fontSize: 14 }}>
                                           <Text style={{ fontWeight: 'bold', color: '#6AA84F' }}>
-                                              @{answer.user?.username || 'Usuario'}
+                                              {answer.user?.username || 'Usuario'}
                                           </Text>
                                           {' '}{answer.content}
                                       </Text>
@@ -565,7 +565,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
                 backgroundColor: '#1a1a1a' 
             }}>
                 <Text style={{ color: '#ccc', fontSize: 13 }}>
-                    Respondiendo a <Text style={{ fontWeight: 'bold', color: 'white' }}>@{replyingTo.user.username}</Text>
+                    Respondiendo a <Text style={{ fontWeight: 'bold', color: 'white' }}>{replyingTo.user.username}</Text>
                 </Text>
                 <TouchableOpacity onPress={handleCancelReply}>
                     <Ionicons name="close-circle" size={20} color="#999" />
