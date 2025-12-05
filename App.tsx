@@ -241,7 +241,7 @@ export default function App() {
                     component={SettingsPage}
                 />
                 <Stack.Screen
-                    name="VideoGrid"
+                    name="VideoFullScreen"
                     options={{headerShown: false}}
                     component={VideoFullScreen}
                 />
