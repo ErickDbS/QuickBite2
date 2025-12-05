@@ -312,8 +312,6 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
         
         // 🚀 Recargar SOLO las respuestas del comentario padre y mostrarlas
         await fetchAnswersForComment(parentCommentId, true); 
-        
-        Alert.alert("Éxito", "Respuesta enviada");
 
       } else {
         // Enviar comentario principal
@@ -449,7 +447,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
   return (
     <View style={{ flex: 1, backgroundColor: "black" }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#333' }}>
-        <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>Comentarios ({comments.length})</Text>
+        <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>Comentarios</Text>
         <TouchableOpacity onPress={onClose}>
           <Ionicons name="close" size={28} color="white" />
         </TouchableOpacity>
