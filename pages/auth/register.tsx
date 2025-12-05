@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TextInput, TouchableOpacity, View, Alert } from 'react-native';
 import "../../global.css"
 import * as Yup from 'yup'
 import { Formik } from 'formik';
@@ -18,7 +18,6 @@ export default function Register({ navigation }: any) {
   const [step, setStep] = useState(1)
   const [firstStepData, setFirstStepData] = useState<any>(null)
 
-  // ===== VALIDACIONES =====
   const registerSchema = Yup.object().shape({
     nombre: Yup.string().required("El nombre es requerido"),
     apellido: Yup.string().required("El apellido es requerido"),
@@ -30,31 +29,37 @@ export default function Register({ navigation }: any) {
   })
 
   const registrationNextStep = Yup.object().shape({
-    userName: Yup.string().required("El nombre de usuario es requerido"),
+    alias: Yup.string().required("El nombre de usuario es requerido"),
     userIdentifier: Yup.string().required("El identificador es requerido")
   })
 
-  // ===== POST FINAL =====
   const handleRegister = async (values: any) => {
     if (!firstStepData) {
       console.error("Faltan datos del primer paso");
       return;
     }
 
-  const payload = {
-    name: firstStepData.nombre,
-    lastname: firstStepData.apellido,
-    alias: values.alias,
-    email: firstStepData.email,
-    password: firstStepData.password,
-    handle: values.userIdentifier
-  };
+    const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
+    if (!API_URL) {
+        Alert.alert("Error de Configuración", "La URL de la API no está definida.");
+        return;
+    }
+
+    const payload = {
+      name: firstStepData.nombre,
+      lastname: firstStepData.apellido,
+      alias: values.alias,
+      email: firstStepData.email,
+      password: firstStepData.password,
+      handle: values.userIdentifier
+    };
 
 
-    console.log("Payload:", payload);
+    console.log("Intentando registrar con Payload:", payload);
+    console.log("URL de Registro:", `${API_URL}/auth/register`);
 
     try {
-      const res = await axios.post(`${process.env.EXPO_PUBLIC_AWS_API_URL}/auth/register`, payload);
+      const res = await axios.post(`${API_URL}/auth/register`, payload);
 
       console.log("Registro exitoso:", res.data);
 
@@ -64,9 +69,32 @@ export default function Register({ navigation }: any) {
       });
 
     } catch (err: any) {
-      console.log("Error REAL:", err);
-      console.log("Error response:", err.response?.data);
-      console.log("Error message:", err.message);
+      console.error("Error al intentar registrar:", err);
+      
+      let errorMessage = "Ocurrió un error inesperado al registrar.";
+
+      if (err.response) {
+        const status = err.response.status;
+        const data = err.response.data;
+        
+        console.error(`Error Status: ${status}`);
+        console.error("Error Response Data:", data);
+
+        if (status === 400 && data.message) {
+            errorMessage = data.message;
+        } else if (status === 500) {
+            errorMessage = "Error interno del servidor. Inténtalo más tarde.";
+        } else {
+            errorMessage = `Error ${status}: El servidor rechazó la solicitud.`;
+        }
+
+      } else if (err.request) {
+        errorMessage = "Error de conexión: No se pudo contactar al servidor. Revisa tu API_URL.";
+      } else {
+        errorMessage = `Error de la aplicación: ${err.message}`;
+      }
+      
+      Alert.alert("⚠️ Error de Registro", errorMessage);
     }
   };
 
@@ -74,9 +102,6 @@ export default function Register({ navigation }: any) {
     <ScrollView className="flex-1 bg-gray-300">
 
       {step === 1 ? (
-        // =========================================================
-        // ====================   PASO 1   =========================
-        // =========================================================
         <View className="pt-20 px-10">
           <Text className="text-2xl font-bold text-green-600 text-center mb-8">
             Unete a QuickBite
@@ -162,7 +187,6 @@ export default function Register({ navigation }: any) {
                     if (Object.keys(validationErrors).length === 0) {
                       handleSubmit();
                     } else {
-                      // marcar todos como tocados
                       setTouched({
                         nombre: true,
                         apellido: true,
@@ -189,9 +213,6 @@ export default function Register({ navigation }: any) {
         </View>
 
       ) : (
-        // =========================================================
-        // ====================   PASO 2   =========================
-        // =========================================================
         <ScrollView className="flex-1 bg-gray-300">
           <Formik
             initialValues={{

@@ -1,7 +1,9 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { useRef, useState } from "react";
-import { TouchableOpacity, StyleSheet, View, Text } from "react-native";
+import { useRef, useState, useCallback } from "react";
+import { TouchableOpacity, StyleSheet, View, Text, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import * as ImagePicker from "expo-image-picker";
+import { Ionicons } from "@expo/vector-icons";
 
 export default function RecordScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -38,6 +40,7 @@ export default function RecordScreen() {
 
     } catch (err) {
       console.error("Error al grabar:", err);
+      Alert.alert("Error de Grabación", "Asegúrate de tener permisos de cámara y micrófono.");
       setRecording(false);
     }
   };
@@ -48,15 +51,53 @@ export default function RecordScreen() {
     setRecording(false);
   };
 
+  const pickVideo = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert("Permiso Requerido", "Necesitamos acceso a la galería para subir videos.");
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      allowsEditing: true,
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      const uri = result.assets[0].uri;
+      
+      navigation.getParent()?.navigate("Preview", { uri });
+    }
+  };
+
+
   return (
     <View style={{ flex: 1 }}>
       <CameraView ref={cameraRef} style={{ flex: 1 }} mode="video" />
 
       <View style={styles.buttons}>
-        {!recording ? (
-          <TouchableOpacity style={styles.recordBtn} onPress={startRecording} />
-        ) : (
-          <TouchableOpacity style={styles.stopBtn} onPress={stopRecording} />
+        
+        {!recording && (
+          <TouchableOpacity 
+            style={styles.galleryBtn} 
+            onPress={pickVideo}
+            disabled={recording}
+          >
+            <Ionicons name="image-outline" size={30} color="white" />
+          </TouchableOpacity>
+        )}
+
+        <View style={styles.recordContainer}>
+          {!recording ? (
+            <TouchableOpacity style={styles.recordBtn} onPress={startRecording} />
+          ) : (
+            <TouchableOpacity style={styles.stopBtn} onPress={stopRecording} />
+          )}
+        </View>
+
+        {!recording && (
+          <View style={styles.galleryBtnPlaceholder} />
         )}
       </View>
     </View>
@@ -82,7 +123,15 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 40,
     width: "100%",
+    flexDirection: 'row',
+    justifyContent: 'space-around',
     alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  
+  recordContainer: {
+    flex: 1,
+    alignItems: 'center',
   },
 
   recordBtn: {
@@ -102,4 +151,14 @@ const styles = StyleSheet.create({
     borderWidth: 6,
     borderColor: "red",
   },
+  
+  galleryBtn: {
+    padding: 10,
+  },
+  
+  galleryBtnPlaceholder: {
+      width: 50,
+      height: 50,
+      opacity: 0,
+  }
 });

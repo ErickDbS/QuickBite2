@@ -1,19 +1,16 @@
-import { StatusBar } from "expo-status-bar";
-import {
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import "../../global.css";
-import { Formik } from "formik";
-import * as Yup from "yup";
-import axios from "axios";
-import * as SecureStore from "expo-secure-store";
+import { StatusBar } from 'expo-status-bar';
+import { ScrollView, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import "../../global.css"
+import { Formik } from 'formik';
+import * as Yup from 'yup';
+import axios from 'axios';
+import * as SecureStore from 'expo-secure-store';
+import { useState } from 'react';
 
 export default function Login({ navigation }: any) {
-  // === VALIDACIÓN ===
+
+  const [apiError, setApiError] = useState<string | null>(null);
+
   const loginSchema = Yup.object().shape({
     email: Yup.string()
       .email("Correo inválido")
@@ -23,8 +20,9 @@ export default function Login({ navigation }: any) {
       .required("La contraseña es requerida"),
   });
 
-  // === POST LOGIN ===
-  const handleLogin = async (values: any) => {
+  const handleLogin = async (values: any, { setSubmitting }: any) => {
+    setApiError(null);
+    
     try {
       const payload = {
         email: values.email,
@@ -53,17 +51,7 @@ export default function Login({ navigation }: any) {
         await SecureStore.setItemAsync("refreshToken", refreshToken);
       }
 
-      console.log("Access token recibido:", accessToken);
-      console.log("Refresh token recibido:", refreshToken);
-      console.log("Guardado en SecureStore:");
-      console.log(
-        "accessToken:",
-        await SecureStore.getItemAsync("accessToken")
-      );
-      console.log(
-        "refreshToken:",
-        await SecureStore.getItemAsync("refreshToken")
-      );
+      console.log("Tokens guardados.");
 
       navigation.reset({
         index: 0,
@@ -71,6 +59,17 @@ export default function Login({ navigation }: any) {
       });
     } catch (err: any) {
       console.log("Error login:", err.response?.data || err.message);
+      
+      const status = err.response?.status;
+      
+      if (status === 401 || status === 400) {
+        setApiError("Correo o contraseña incorrectas");
+      } else {
+        setApiError("Error de conexión. Inténtalo más tarde.");
+      }
+
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -86,16 +85,9 @@ export default function Login({ navigation }: any) {
           validationSchema={loginSchema}
           onSubmit={handleLogin}
         >
-          {({
-            values,
-            errors,
-            touched,
-            handleChange,
-            handleBlur,
-            handleSubmit,
-          }) => (
+          {({ values, errors, touched, handleChange, handleBlur, handleSubmit, isSubmitting, isValid }) => (
             <View className="w-full max-w-md mx-auto">
-              {/* Email */}
+
               <Text className="font-bold text-lg mb-1">Correo Electrónico</Text>
               <TextInput
                 className="border-2 rounded-xl p-3 w-full mb-1"
@@ -110,7 +102,6 @@ export default function Login({ navigation }: any) {
                 <Text className="text-red-600 mb-3">{errors.email}</Text>
               )}
 
-              {/* Password */}
               <Text className="font-bold text-lg mb-1 mt-3">Contraseña</Text>
               <TextInput
                 className="border-2 rounded-xl p-3 w-full mb-1"
@@ -123,16 +114,24 @@ export default function Login({ navigation }: any) {
               {errors.password && touched.password && (
                 <Text className="text-red-600 mb-3">{errors.password}</Text>
               )}
+              
+              {apiError && (
+                 <Text className="text-red-600 mb-3 mt-3 text-center">{apiError}</Text>
+              )}
 
-              {/* BOTÓN */}
               <TouchableOpacity
-                className="bg-green-600 rounded-2xl p-4 w-[50%] justify-center items-center mx-auto mt-4"
+                className={`rounded-2xl p-4 w-[50%] justify-center items-center mx-auto mt-4 
+                  ${isValid && !isSubmitting ? 'bg-green-600' : 'bg-gray-400'}`}
                 onPress={() => handleSubmit()}
+                disabled={!isValid || isSubmitting}
               >
-                <Text className="text-lg font-bold text-white">INGRESAR</Text>
+                {isSubmitting ? (
+                   <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text className="text-lg font-bold text-white">INGRESAR</Text>
+                )}
               </TouchableOpacity>
 
-              {/* Ir a registro */}
               <View className="flex-row justify-center mt-4">
                 <Text className="text-md">¿Aún no tienes una cuenta?</Text>
                 <TouchableOpacity
