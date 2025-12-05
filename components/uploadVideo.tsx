@@ -71,6 +71,8 @@ async function refreshAccessToken() {
 export default async function uploadVideo(
   uri: string,
   descripcion: string,
+  // 🚨 CORRECCIÓN 1: Agregar el parámetro para la URI de la miniatura
+  thumbUri: string | null, 
   onStatus?: (phase: 'UPLOADING' | 'VERIFYING' | 'APROBADO' | 'RECHAZADO' | 'ERROR') => void
 ): Promise<'APROBADO' | 'RECHAZADO' | 'ERROR'> {
 
@@ -80,11 +82,23 @@ export default async function uploadVideo(
 
   // Crear FormData
   const form = new FormData();
+  
+  // Video
   form.append("file", {
     uri,
     name: "video.mp4",
     type: "video/mp4",
   } as any);
+  
+  // 🚨 CORRECCIÓN 2: Adjuntar la miniatura al FormData si existe
+  if (thumbUri) {
+    form.append("thumbnail", {
+      uri: thumbUri,
+      name: "thumbnail.jpeg",
+      type: "image/jpeg", // Asumiendo que VideoThumbnails genera JPEG
+    } as any);
+  }
+  
   form.append("description", descripcion);
 
   try {
@@ -130,7 +144,7 @@ export default async function uploadVideo(
       try {
         const res = await axios.post(
           `${process.env.EXPO_PUBLIC_AWS_API_URL}/videos/upload`,
-          form,
+          form, // Reutilizamos el mismo formulario (con la miniatura)
           {
             headers: { Authorization: `Bearer ${newToken}` },
             timeout: 500000,

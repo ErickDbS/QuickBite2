@@ -15,12 +15,13 @@ import { Video, ResizeMode } from "expo-av";
 import { Ionicons } from "@expo/vector-icons";
 import { useIsFocused } from "@react-navigation/native";
 import axios from "axios";
+import * as SecureStore from 'expo-secure-store';
 
 const { height, width } = Dimensions.get("window");
 
 interface VideoItem {
   id: string;
-  url: string;
+  url: string; 
   commentsCount: number;
   likesCount: number;
   userHasLiked: boolean;
@@ -32,6 +33,8 @@ interface VideoItem {
 interface FYPProps {
   onVideoSelect?: (videoId: string | null, commentsCount: number, likesCount: number, userHasLiked: boolean) => void;
   onSetFypUpdateLikes?: (func: (videoId: string, newLikesCount: number, newUserHasLiked: boolean) => void) => void;
+  feedUrl: string; 
+  feedType: 'FOR_YOU' | 'FOLLOWING'; 
 }
 
 const viewabilityConfig = {
@@ -39,7 +42,12 @@ const viewabilityConfig = {
   minimumViewTime: 300,
 };
 
-export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
+async function getToken() {
+  const rawToken = await SecureStore.getItemAsync('accessToken');
+  return rawToken ? rawToken.trim() : null;
+}
+
+export default function FYP({ onVideoSelect, onSetFypUpdateLikes, feedUrl, feedType }: FYPProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const videoRefs = useRef<(Video | null)[]>([]);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -55,14 +63,17 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const BACKGROUND_REFRESH_MS = 30000;
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
 
+  // 🚨 CORRECCIÓN CLAVE 1: Mapeo de datos (asegurar URL y userHasLiked)
   const mapVideoData = (item: any): VideoItem => ({
     id: item.id,
-    url: item.url,
+    // Asegurar que la URL del video esté disponible (si tu API usa 'videoUrl' o 'source', cámbialo aquí)
+    url: item.url || item.videoUrl || '', 
     commentsCount: item.commentsCount || 0,
-    likesCount: item.likes || 0,
-    userHasLiked: item.isLiked === true,
+    // Usamos 'likes' si viene de 'Para Ti', 'likesCount' si viene de 'Siguiendo'.
+    likesCount: item.likesCount || item.likes || 0, 
+    // Esto es crucial para el corazón. Asegúrate de que tu API devuelve 'isLiked: true' o 'false' en el feed.
+    userHasLiked: item.isLiked === true, 
     creator: item.creator,
     description: item.description || '',
   });
@@ -92,24 +103,57 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
     }
   }, [onSetFypUpdateLikes, updateVideoLikesInternal]);
 
+  const getAxiosConfig = useCallback(async () => {
+    if (feedType === 'FOLLOWING') {
+        const token = await getToken();
+        if (!token) {
+            setLoadError("Debes iniciar sesión para ver contenido de 'Siguiendo'");
+            return {
+                headers: {},
+                authRequired: true,
+                tokenMissing: true,
+            };
+        }
+        return {
+            headers: { 'Authorization': `Bearer ${token}` },
+            authRequired: true,
+            tokenMissing: false,
+        };
+    }
+    return { 
+        headers: {}, 
+        authRequired: false,
+        tokenMissing: false,
+    };
+  }, [feedType]);
+
+
   const loadMore = useCallback(async (isInitialLoad = false) => {
-    if (!API_URL || (!isInitialLoad && !hasMore) || loadingMore || refreshing) return;
+    if ((!isInitialLoad && !hasMore) || loadingMore || refreshing) return;
+
+    const config = await getAxiosConfig();
+    if (config.tokenMissing) {
+        setLoadingInitial(false);
+        setLoadingMore(false);
+        return;
+    }
 
     setLoadError(null);
     isInitialLoad && data.length === 0 ? setLoadingInitial(true) : setLoadingMore(true);
 
     try {
-      const res = await axios.get(`${API_URL}/videos/feed`, {
+      const res = await axios.get(feedUrl, {
         params: { page: isInitialLoad ? 0 : page, size: PAGE_SIZE },
+        headers: config.headers,
       });
 
       const items: VideoItem[] = Array.isArray(res.data) ? res.data.map(mapVideoData) : [];
       const startingPage = isInitialLoad ? 1 : page + 1;
 
-      setData(prev => isInitialLoad ? items : [
-        ...prev,
-        ...items.filter((i: any) => !prev.some(p => p.id === i.id))
-      ]);
+      setData(prev => {
+        const newItems = items.filter((i: any) => !prev.some(p => p.id === i.id));
+        return isInitialLoad ? newItems : [...prev, ...newItems];
+      });
 
       setPage(startingPage);
       setHasMore(items.length >= PAGE_SIZE);
@@ -118,21 +162,33 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
         onVideoSelect(items[0].id, items[0].commentsCount, items[0].likesCount, items[0].userHasLiked);
       }
     } catch (e: any) {
-      console.error("Error loading feed:", e?.message);
-      setLoadError("Error cargando videos");
+      console.error("Error loading feed:", e?.message, e.response?.status);
+      setLoadError(
+        feedType === 'FOLLOWING' && (e.response?.status === 401 || e.response?.status === 403)
+          ? "Sesión expirada. Por favor, vuelve a iniciar sesión."
+          : "Error cargando videos"
+      );
       setHasMore(false);
     } finally {
       setLoadingInitial(false);
       setLoadingMore(false);
     }
-  }, [API_URL, hasMore, page, loadingMore, refreshing, data.length, onVideoSelect]);
+  }, [hasMore, page, loadingMore, refreshing, data.length, onVideoSelect, feedUrl, feedType, getAxiosConfig]);
 
   const refreshFeed = useCallback(async () => {
-    if (!API_URL || refreshing) return;
+    if (refreshing) return;
+    
+    const config = await getAxiosConfig();
+    if (config.tokenMissing) {
+        setRefreshing(false);
+        return;
+    }
+
     setRefreshing(true);
     try {
-      const res = await axios.get(`${API_URL}/videos/feed`, {
+      const res = await axios.get(feedUrl, {
         params: { page: 0, size: PAGE_SIZE },
+        headers: config.headers,
       });
       const items: VideoItem[] = Array.isArray(res.data) ? res.data.map(mapVideoData) : [];
       setData(items);
@@ -148,13 +204,18 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
     } finally {
       setRefreshing(false);
     }
-  }, [API_URL, refreshing, onVideoSelect]);
+  }, [refreshing, onVideoSelect, feedUrl, getAxiosConfig]);
 
   const backgroundRefresh = useCallback(async () => {
-    if (!API_URL || loadingMore || refreshing) return;
+    if (loadingMore || refreshing) return;
+
+    const config = await getAxiosConfig();
+    if (config.tokenMissing) return;
+
     try {
-      const res = await axios.get(`${API_URL}/videos/feed`, {
+      const res = await axios.get(feedUrl, {
         params: { page: 0, size: PAGE_SIZE },
+        headers: config.headers,
       });
       const items: VideoItem[] = Array.isArray(res.data) ? res.data.map(mapVideoData) : [];
       setData(prev => {
@@ -165,11 +226,11 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
     } catch (e: any) {
       console.log("Error background refresh:", e?.message);
     }
-  }, [API_URL, loadingMore, refreshing]);
+  }, [loadingMore, refreshing, feedUrl, getAxiosConfig]);
 
   useEffect(() => {
     loadMore(true);
-  }, []);
+  }, [feedUrl]); // Recargar al cambiar de feed
 
   useEffect(() => {
     if (!isFocused) return;
@@ -177,19 +238,35 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
     return () => clearInterval(id);
   }, [isFocused, backgroundRefresh]);
 
+  // 🚨 CORRECCIÓN CLAVE 2: Lógica de Reproducción/Pausa al cambiar de slide/foco/feed
   useEffect(() => {
+    // 1. Pausar todos al salir del foco o al cambiar de feed
+    if (!isFocused) {
+        videoRefs.current.forEach(video => {
+            if (video) video.pauseAsync();
+        });
+        setIsPlaying(false);
+        return;
+    }
+
+    // 2. Controlar la reproducción del video actual
     videoRefs.current.forEach((video, index) => {
       if (video && index !== currentIndex) {
         video.pauseAsync();
-        video.setPositionAsync(0);
+        // Resetear la posición de los videos no activos para que empiecen desde el inicio al volver
+        video.setPositionAsync(0, { toleranceMillisBefore: 100, toleranceMillisAfter: 100 }); 
       }
     });
 
     const currentVideo = videoRefs.current[currentIndex];
     if (currentVideo) {
-      isFocused && isPlaying ? currentVideo.playAsync() : currentVideo.pauseAsync();
+      if (isFocused && isPlaying) {
+          currentVideo.playAsync();
+      } else {
+          currentVideo.pauseAsync();
+      }
     }
-  }, [isFocused, isPlaying, currentIndex, data]);
+  }, [isFocused, isPlaying, currentIndex, data, feedUrl]); // feedUrl es importante aquí
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems.length > 0) {
@@ -287,18 +364,35 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
     );
   }
 
+  // 🚨 Mensaje de error (incluyendo error de login en "Siguiendo")
   if (loadError && data.length === 0) {
+    const isLoginError = loadError.includes("Debes iniciar sesión");
     return (
       <View style={styles.loadingContainer}>
-        <Text style={{ color: 'white', marginBottom: 10 }}>{loadError}</Text>
-        <TouchableOpacity
-          onPress={() => loadMore(true)}
-          style={{ padding: 10, backgroundColor: '#4CAF50', borderRadius: 5 }}
-        >
-          <Text style={{ color: 'white' }}>Reintentar</Text>
-        </TouchableOpacity>
+        <Text style={{ color: 'white', marginBottom: 10, textAlign: 'center' }}>
+            {loadError}
+        </Text>
+        {!isLoginError && (
+            <TouchableOpacity
+                onPress={() => loadMore(true)}
+                style={{ padding: 10, backgroundColor: '#4CAF50', borderRadius: 5 }}
+            >
+                <Text style={{ color: 'white' }}>Reintentar</Text>
+            </TouchableOpacity>
+        )}
       </View>
     );
+  }
+  
+  // 🚨 Mostrar mensaje si está en 'Siguiendo' y no hay videos
+  if (feedType === 'FOLLOWING' && data.length === 0 && !loadingInitial) {
+      return (
+          <View style={styles.loadingContainer}>
+              <Text style={{ color: 'white', fontSize: 16, textAlign: 'center' }}>
+                  Aún no sigues a nadie o no han subido videos.
+              </Text>
+          </View>
+      );
   }
 
   return (
@@ -308,15 +402,24 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
         renderItem={({ item, index }) => (
           <TouchableWithoutFeedback onPress={() => handlePlayPause(index)}>
             <View style={styles.videoContainer}>
-              <Video
-                ref={(ref) => { if (ref) videoRefs.current[index] = ref; }}
-                source={{ uri: item.url }}
-                style={styles.video}
-                resizeMode={ResizeMode.COVER}
-                isLooping
-                shouldPlay={false}
-                useNativeControls={false}
-              />
+              {/* 🚨 CORRECCIÓN CLAVE 3: Renderizar condicionalmente el componente Video.
+                  Si la URL no llega, esto es lo que hace que la pantalla se quede en negro. */}
+              {item.url ? (
+                <Video
+                  ref={(ref) => { if (ref) videoRefs.current[index] = ref; }}
+                  source={{ uri: item.url }}
+                  style={styles.video}
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                  shouldPlay={false}
+                  useNativeControls={false}
+                  onError={(e) => console.error(`Error en Video ${item.id}:`, e)}
+                />
+              ) : (
+                 <View style={[styles.video, { justifyContent: 'center', alignItems: 'center' }]}>
+                    <Text style={{ color: 'white' }}>Video no disponible (Falta URL)</Text>
+                 </View>
+              )}
 
               <View style={styles.controls}>
                 <TouchableOpacity onPress={() => handlePlayPause(index)}>

@@ -1,8 +1,8 @@
-import { View, Text, TouchableWithoutFeedback, Animated, Dimensions, Alert } from "react-native";
+import { View, Text, TouchableWithoutFeedback, Animated, Dimensions, Alert, Platform, TouchableOpacity } from "react-native";
 import FYP from "../components/fyp";
 import { Ionicons } from "@expo/vector-icons";
 import CommentsComponent from "../components/commentsComponent";
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useMemo } from "react";
 import { useIsFocused } from "@react-navigation/native";
 import axios from "axios";
 import * as SecureStore from 'expo-secure-store';
@@ -13,6 +13,9 @@ const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
 interface HomeScreenProps {
   navigation: any;
 }
+
+// 🚨 Nuevo Tipo para controlar la fuente de datos
+type FeedType = 'FOR_YOU' | 'FOLLOWING';
 
 async function getToken() {
   const rawToken = await SecureStore.getItemAsync('accessToken');
@@ -29,6 +32,10 @@ export default function Home({ navigation }: HomeScreenProps) {
   const [isLiking, setIsLiking] = useState(false);
   const translateY = useRef(new Animated.Value(height)).current;
   const scale = useRef(new Animated.Value(1)).current;
+  
+  // 🚨 Estado para la pestaña activa (por defecto 'Para Ti')
+  const [activeTab, setActiveTab] = useState<FeedType>('FOR_YOU'); 
+
   const fypUpdateLikesRef = useRef<((videoId: string, newLikesCount: number, newUserHasLiked: boolean) => void) | null>(null);
 
   const handleSetFypUpdateLikes = useCallback((func: (videoId: string, newLikesCount: number, newUserHasLiked: boolean) => void) => {
@@ -76,7 +83,6 @@ export default function Home({ navigation }: HomeScreenProps) {
       return;
     }
 
-    // Optimistic update
     const newHasLiked = !userHasLiked;
     const oldLikesCount = likesCount;
     const newLikesCount = newHasLiked ? oldLikesCount + 1 : oldLikesCount - 1;
@@ -84,7 +90,6 @@ export default function Home({ navigation }: HomeScreenProps) {
     setUserHasLiked(newHasLiked);
     setLikesCount(newLikesCount);
 
-    // Animation
     Animated.sequence([
       Animated.spring(scale, {
         toValue: newHasLiked ? 1.2 : 0.9,
@@ -110,7 +115,6 @@ export default function Home({ navigation }: HomeScreenProps) {
       }
     } catch (error) {
       console.error("Error toggling like:", error);
-      // Rollback on error
       setUserHasLiked(!newHasLiked);
       setLikesCount(oldLikesCount);
       Alert.alert("Error", "No se pudo registrar el 'Me Gusta'. Inténtalo de nuevo.");
@@ -119,23 +123,52 @@ export default function Home({ navigation }: HomeScreenProps) {
     }
   }
 
+  // 🚨 Definir la URL del endpoint basándose en la pestaña activa
+  const feedUrl = useMemo(() => {
+    return activeTab === 'FOR_YOU' 
+      ? `${API_URL}/videos/feed` 
+      : `${API_URL}/videos/feed/followed`;
+  }, [activeTab, API_URL]);
+
   return (
     <View className="flex-1">
       <View className="flex-1 bg-gray-900">
+        
+        {/* 🚨 Pasar la URL y la pestaña activa a FYP */}
         <FYP 
+          key={activeTab} // 🚨 Usar key para forzar el remount y reset del estado interno de FYP al cambiar de pestaña
+          feedUrl={feedUrl}
+          feedType={activeTab}
           onVideoSelect={handleVideoSelect} 
           onSetFypUpdateLikes={handleSetFypUpdateLikes}
         />
 
-        <View className="absolute top-16 left-0 right-0 z-10">
-          <View className="flex-row justify-center gap-20">
-            <Text className="text-lg text-white font-bold">Siguiendo</Text>
-            <Text className="text-lg text-white font-bold">Para ti</Text>
+        <View className="absolute top-16 left-0 right-0 z-10" style={{ paddingTop: Platform.OS === 'ios' ? 0 : 10 }}>
+          <View className="flex-row justify-center gap-10">
+            
+            {/* Botón Siguiendo */}
+            <TouchableOpacity onPress={() => setActiveTab('FOLLOWING')}>
+                <Text 
+                    className={`text-lg text-white font-bold ${activeTab === 'FOLLOWING' ? 'opacity-100' : 'opacity-60'}`}
+                >
+                    Siguiendo
+                </Text>
+            </TouchableOpacity>
+
+            {/* Botón Para Ti */}
+            <TouchableOpacity onPress={() => setActiveTab('FOR_YOU')}>
+                <Text 
+                    className={`text-lg text-white font-bold ${activeTab === 'FOR_YOU' ? 'opacity-100' : 'opacity-60'}`}
+                >
+                    Para ti
+                </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
         <View className="absolute right-4 bottom-24 gap-6 pb-20">
-          {/* Profile Button */}
+          {/* ... (Botones de acción sin cambios) ... */}
+           {/* Profile Button */}
           <View className="items-center">
             <TouchableWithoutFeedback onPress={() => navigation.navigate("UserProfile")}>
               <Ionicons name="person-circle-outline" size={34} color="white" />
@@ -176,6 +209,7 @@ export default function Home({ navigation }: HomeScreenProps) {
             <Ionicons name="share-social-outline" size={34} color="white" />
             <Text className="text-white text-xs">Compartir</Text>
           </View>
+
         </View>
       </View>
 

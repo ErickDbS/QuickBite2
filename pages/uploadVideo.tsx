@@ -4,6 +4,8 @@ import { TouchableOpacity, StyleSheet, View, Text, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
+import * as VideoThumbnails from "expo-video-thumbnails";
+
 
 export default function RecordScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -22,6 +24,22 @@ export default function RecordScreen() {
       </View>
     );
 
+  // Función auxiliar de navegación para evitar repetición y asegurar estabilidad
+  const safeNavigateToPreview = (uri: string, thumbUri: string | null = null) => {
+    try {
+        const parent = navigation.getParent();
+        if (parent) {
+          parent.navigate("Preview", { uri, thumbUri });
+        } else {
+          navigation.navigate("Preview", { uri, thumbUri }); 
+        }
+    } catch (e) {
+        console.error("Error crítico de navegación a Preview:", e);
+        Alert.alert("Error de navegación", "No se pudo abrir la pantalla de previsualización.");
+    }
+  };
+
+
   const startRecording = async () => {
     if (!cameraRef.current) return;
 
@@ -36,7 +54,15 @@ export default function RecordScreen() {
 
       if (!video?.uri) return;
 
-      navigation.getParent()?.navigate("Preview", { uri: video.uri });
+      let thumbUri = null;
+      try {
+        const thumbnailResult = await VideoThumbnails.getThumbnailAsync(video.uri, { time: 1000 });
+        thumbUri = thumbnailResult.uri;
+      } catch (err) {
+        console.error("Error al generar miniatura después de grabar:", err);
+      }
+      
+      safeNavigateToPreview(video.uri, thumbUri);
 
     } catch (err) {
       console.error("Error al grabar:", err);
@@ -57,17 +83,28 @@ export default function RecordScreen() {
       Alert.alert("Permiso Requerido", "Necesitamos acceso a la galería para subir videos.");
       return;
     }
-
+    
+    // 🚨 CORRECCIÓN CLAVE: Mantenemos allowsEditing: false por seguridad.
+    // Si necesitas reintroducir la edición (lo cual no es recomendable para videos largos), 
+    // debes investigar errores nativos específicos de tu dispositivo/versión de Expo.
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsEditing: true,
+      allowsEditing: false, 
       quality: 1,
     });
 
     if (!result.canceled) {
-      const uri = result.assets[0].uri;
+      // 🚨 USO DE OPERADOR DE ENCADENAMIENTO OPCIONAL EN ASSETS
+      const uri = result.assets?.[0]?.uri;
+
+      if (!uri) {
+        Alert.alert("Error de archivo", "No se pudo obtener la URI del video seleccionado.");
+        console.error("ImagePicker no devolvió una URI válida.");
+        return;
+      }
       
-      navigation.getParent()?.navigate("Preview", { uri });
+      // La URI del video se usa como input para generar la miniatura en UploadScreen
+      safeNavigateToPreview(uri, uri);
     }
   };
 

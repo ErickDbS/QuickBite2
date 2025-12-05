@@ -1,27 +1,35 @@
 import { useEffect, useState } from "react";
-import { View, TextInput, Text, TouchableOpacity, StyleSheet, Image } from "react-native";
-import uploadVideo from "../components/uploadVideo";
+import { View, TextInput, Text, TouchableOpacity, StyleSheet, Image, Alert } from "react-native";
+// 🚨 Importar el módulo corregido
+import uploadVideo from "../components/uploadVideo"; 
 import * as VideoThumbnails from "expo-video-thumbnails";
 import * as Notifications from "expo-notifications";
 
 export default function UploadScreen({ route, navigation }: any) {
+  // 🚨 CORRECCIÓN 1: Obtener también la thumbUri de route.params
   const { uri } = route.params;
   const [descripcion, setDescripcion] = useState("");
   const [estado, setEstado] = useState("");
-  const [thumbUri, setThumbUri] = useState<string | null>(null);
+  const [thumbUri, setThumbUri] = useState<string | null>(route.params.thumbUri || null); // Usar la URI que viene del picker
 
+  // 🚨 CORRECCIÓN 2: Si la thumbUri no vino de RecordScreen, generarla aquí.
   useEffect(() => {
+    // Si ya tenemos una URI (del picker), no hacemos nada
+    if (thumbUri) return;
+    
     let cancelled = false;
     (async () => {
       try {
         const result = await VideoThumbnails.getThumbnailAsync(uri, { time: 1000 });
         if (!cancelled) setThumbUri(result.uri);
-      } catch {}
+      } catch (error) {
+          console.error("Error generando miniatura:", error);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [uri]);
+  }, [uri, thumbUri]); // Dependencia thumbUri para evitar bucles
 
   const notify = async (title: string, body: string) => {
     try {
@@ -37,10 +45,16 @@ export default function UploadScreen({ route, navigation }: any) {
   };
 
   const subir = async () => {
+    if (!thumbUri) {
+        Alert.alert("Error", "La miniatura aún no se ha generado. Inténtalo de nuevo.");
+        return;
+    }
+      
     try {
       setEstado("Subiendo...");
 
-      const final = await uploadVideo(uri, descripcion, (phase) => {
+      // 🚨 CORRECCIÓN 3: Pasar thumbUri a la función de subida
+      const final = await uploadVideo(uri, descripcion, thumbUri, (phase) => {
         if (phase === "UPLOADING") setEstado("Subiendo...");
         if (phase === "VERIFYING") setEstado("Verificando video...");
         if (phase === "APROBADO") setEstado("✅ Video aprobado");
@@ -53,9 +67,10 @@ export default function UploadScreen({ route, navigation }: any) {
       }
       if (final === "RECHAZADO") {
         await notify("Video rechazado", "Tu video fue rechazado por la IA");
+        // Navegar de vuelta a la pestaña de subida o a Home después de un rechazo
         navigation.reset({
           index: 0,
-          routes: [{ name: "BottomTap", params: { screen: "Upload" } }],
+          routes: [{ name: "BottomTap", params: { screen: "Home" } }],
         });
         return;
       }
@@ -73,8 +88,13 @@ export default function UploadScreen({ route, navigation }: any) {
 
   return (
     <View style={styles.container}>
-      {thumbUri && (
+      {/* Muestra un placeholder si la miniatura se está cargando */}
+      {thumbUri ? (
         <Image source={{ uri: thumbUri }} style={styles.thumbnail} resizeMode="cover" />
+      ) : (
+        <View style={[styles.thumbnail, { justifyContent: 'center', alignItems: 'center' }]}>
+            <Text style={{ color: '#aaa' }}>Cargando miniatura...</Text>
+        </View>
       )}
       <Text style={styles.label}>Descripción</Text>
 
@@ -86,7 +106,11 @@ export default function UploadScreen({ route, navigation }: any) {
         style={styles.input}
       />
 
-      <TouchableOpacity style={styles.uploadBtn} onPress={subir}>
+      <TouchableOpacity 
+        style={styles.uploadBtn} 
+        onPress={subir}
+        disabled={!thumbUri} // Desactivar el botón si la miniatura no está lista
+      >
         <Text style={styles.btnText}>Subir video</Text>
       </TouchableOpacity>
 

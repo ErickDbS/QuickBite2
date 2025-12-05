@@ -15,6 +15,7 @@ import UploadVideoScreen from "./pages/uploadVideoScreen";
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 import * as SecureStore from "expo-secure-store";
 import * as Notifications from 'expo-notifications';
+import VideoFullScreen from "./components/VideoFullScreen";
 
 const Stack = createNativeStackNavigator();
 const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
@@ -242,7 +243,7 @@ export default function App() {
                 <Stack.Screen
                     name="VideoGrid"
                     options={{headerShown: false}}
-                    component={VideoGrid}
+                    component={VideoFullScreen}
                 />
                 <Stack.Screen
                     name="Preview"
