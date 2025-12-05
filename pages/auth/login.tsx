@@ -1,13 +1,18 @@
-import { StatusBar } from 'expo-status-bar';
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import "../../global.css"
-import { Formik } from 'formik';
-import * as Yup from 'yup';
-import axios from 'axios';
-import * as SecureStore from 'expo-secure-store';
+import { StatusBar } from "expo-status-bar";
+import {
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import "../../global.css";
+import { Formik } from "formik";
+import * as Yup from "yup";
+import axios from "axios";
+import * as SecureStore from "expo-secure-store";
 
 export default function Login({ navigation }: any) {
-
   // === VALIDACIÓN ===
   const loginSchema = Yup.object().shape({
     email: Yup.string()
@@ -15,7 +20,7 @@ export default function Login({ navigation }: any) {
       .required("El correo es requerido"),
     password: Yup.string()
       .min(6, "La contraseña debe tener al menos 6 caracteres")
-      .required("La contraseña es requerida")
+      .required("La contraseña es requerida"),
   });
 
   // === POST LOGIN ===
@@ -23,7 +28,7 @@ export default function Login({ navigation }: any) {
     try {
       const payload = {
         email: values.email,
-        password: values.password
+        password: values.password,
       };
 
       console.log("Payload login:", payload);
@@ -39,24 +44,31 @@ export default function Login({ navigation }: any) {
       const refreshToken = res?.data?.refreshToken;
 
       if (accessToken) {
-        await SecureStore.setItemAsync('accessToken', accessToken);
-        axios.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+        await SecureStore.setItemAsync("accessToken", accessToken);
+        axios.defaults.headers.common[
+          "Authorization"
+        ] = `Bearer ${accessToken}`;
       }
       if (refreshToken) {
-        await SecureStore.setItemAsync('refreshToken', refreshToken);
+        await SecureStore.setItemAsync("refreshToken", refreshToken);
       }
 
       console.log("Access token recibido:", accessToken);
       console.log("Refresh token recibido:", refreshToken);
       console.log("Guardado en SecureStore:");
-      console.log("accessToken:", await SecureStore.getItemAsync("accessToken"));
-      console.log("refreshToken:", await SecureStore.getItemAsync("refreshToken"));
+      console.log(
+        "accessToken:",
+        await SecureStore.getItemAsync("accessToken")
+      );
+      console.log(
+        "refreshToken:",
+        await SecureStore.getItemAsync("refreshToken")
+      );
 
       navigation.reset({
         index: 0,
-        routes: [{ name: "BottomTap" }]
+        routes: [{ name: "BottomTap" }],
       });
-
     } catch (err: any) {
       console.log("Error login:", err.response?.data || err.message);
     }
@@ -74,9 +86,15 @@ export default function Login({ navigation }: any) {
           validationSchema={loginSchema}
           onSubmit={handleLogin}
         >
-          {({ values, errors, touched, handleChange, handleBlur, handleSubmit }) => (
+          {({
+            values,
+            errors,
+            touched,
+            handleChange,
+            handleBlur,
+            handleSubmit,
+          }) => (
             <View className="w-full max-w-md mx-auto">
-
               {/* Email */}
               <Text className="font-bold text-lg mb-1">Correo Electrónico</Text>
               <TextInput
@@ -117,15 +135,18 @@ export default function Login({ navigation }: any) {
               {/* Ir a registro */}
               <View className="flex-row justify-center mt-4">
                 <Text className="text-md">¿Aún no tienes una cuenta?</Text>
-                <TouchableOpacity onPress={() => navigation.navigate("Register")}>
-                  <Text className="text-md text-green-600 font-bold"> Regístrate aquí</Text>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate("Register")}
+                >
+                  <Text className="text-md text-green-600 font-bold">
+                    {" "}
+                    Regístrate aquí
+                  </Text>
                 </TouchableOpacity>
               </View>
-
             </View>
           )}
         </Formik>
-
       </View>
 
       <StatusBar style="auto" />
