@@ -1,5 +1,5 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useEffect } from "react"; // 🚨 Agregamos useEffect
 import { TouchableOpacity, StyleSheet, View, Text, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
@@ -8,23 +8,55 @@ import * as VideoThumbnails from "expo-video-thumbnails";
 
 
 export default function RecordScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
+  // Permisos de Cámara
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView | null>(null);
   const [recording, setRecording] = useState(false);
   const navigation = useNavigation<any>();
+  
+  // 🚨 CORRECCIÓN CLAVE: Estado para los permisos de la Galería
+  const [mediaLibraryPermission, setMediaLibraryPermission] = useState<ImagePicker.PermissionResponse | null>(null);
 
-  if (!permission) return <View />;
+  // 🚨 CORRECCIÓN CLAVE: Solicitud de Permisos de Galería al inicio
+  useEffect(() => {
+    (async () => {
+        const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+             // Intentamos solicitarlo una vez al montar el componente
+             const newPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+             setMediaLibraryPermission(newPermission);
+        } else {
+             setMediaLibraryPermission({ granted: true } as ImagePicker.PermissionResponse);
+        }
+    })();
+  }, []);
 
-  if (!permission.granted)
+
+  // --- Renderizado de Permisos ---
+  // Si no hay permiso de cámara
+  if (!cameraPermission) return <View />;
+  if (!cameraPermission.granted)
     return (
       <View style={styles.center}>
-        <TouchableOpacity style={styles.permissionBtn} onPress={requestPermission}>
+        <TouchableOpacity style={styles.permissionBtn} onPress={requestCameraPermission}>
           <Text style={styles.permissionText}>Permitir cámara</Text>
         </TouchableOpacity>
       </View>
     );
+  
+  // Si falta permiso de Galería (y ya solicitamos el de cámara)
+  if (!mediaLibraryPermission || !mediaLibraryPermission.granted) {
+     return (
+        <View style={styles.center}>
+            <TouchableOpacity style={styles.permissionBtn} onPress={() => ImagePicker.requestMediaLibraryPermissionsAsync().then(setMediaLibraryPermission)}>
+                 <Text style={styles.permissionText}>Permitir Galería</Text>
+            </TouchableOpacity>
+            <Text style={{color: 'white', marginTop: 10}}>Necesitas acceso a la Galería para subir videos.</Text>
+        </View>
+    );
+  }
+  // --- Fin de Renderizado de Permisos ---
 
-  // Función auxiliar de navegación para evitar repetición y asegurar estabilidad
   const safeNavigateToPreview = (uri: string, thumbUri: string | null = null) => {
     try {
         const parent = navigation.getParent();
@@ -78,33 +110,31 @@ export default function RecordScreen() {
   };
 
   const pickVideo = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert("Permiso Requerido", "Necesitamos acceso a la galería para subir videos.");
-      return;
-    }
+    // 🚨 Eliminamos la solicitud de permisos aquí, ya que se manejó en useEffect.
+    // Solo verificamos el estado (que sabemos que debe ser 'granted' para llegar aquí).
     
-    // 🚨 CORRECCIÓN CLAVE: Mantenemos allowsEditing: false por seguridad.
-    // Si necesitas reintroducir la edición (lo cual no es recomendable para videos largos), 
-    // debes investigar errores nativos específicos de tu dispositivo/versión de Expo.
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsEditing: false, 
-      quality: 1,
-    });
+    try {
+        let result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+          allowsEditing: false, 
+          quality: 1,
+        });
 
-    if (!result.canceled) {
-      // 🚨 USO DE OPERADOR DE ENCADENAMIENTO OPCIONAL EN ASSETS
-      const uri = result.assets?.[0]?.uri;
+        if (!result.canceled) {
+          const uri = result.assets?.[0]?.uri;
 
-      if (!uri) {
-        Alert.alert("Error de archivo", "No se pudo obtener la URI del video seleccionado.");
-        console.error("ImagePicker no devolvió una URI válida.");
-        return;
-      }
-      
-      // La URI del video se usa como input para generar la miniatura en UploadScreen
-      safeNavigateToPreview(uri, uri);
+          if (!uri) {
+            Alert.alert("Error de archivo", "No se pudo obtener la URI del video seleccionado.");
+            console.error("ImagePicker no devolvió una URI válida.");
+            return;
+          }
+          
+          safeNavigateToPreview(uri, uri);
+        }
+    } catch (e) {
+        // Captura cualquier error nativo que ocurra durante el lanzamiento del picker
+        console.error("Error al lanzar ImagePicker:", e);
+        Alert.alert("Error de Galería", "Hubo un error al abrir la galería. Asegúrate de tener la app actualizada.");
     }
   };
 
@@ -142,10 +172,10 @@ export default function RecordScreen() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "black" }, // Aseguramos fondo negro
 
   permissionBtn: {
-    backgroundColor: "black",
+    backgroundColor: "red", // Cambiamos a rojo para enfocar la acción
     paddingVertical: 14,
     paddingHorizontal: 20,
     borderRadius: 8,
@@ -154,6 +184,7 @@ const styles = StyleSheet.create({
   permissionText: {
     color: "white",
     fontSize: 16,
+    fontWeight: 'bold',
   },
 
   buttons: {
