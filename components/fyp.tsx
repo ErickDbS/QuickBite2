@@ -16,15 +16,22 @@ import { Ionicons } from "@expo/vector-icons";
 import { useIsFocused } from "@react-navigation/native";
 import axios from "axios";
 
-const { height, width } = Dimensions.get("window"); // Obtenemos ancho y alto
+const { height, width } = Dimensions.get("window");
 
 interface VideoItem {
   id: string;
   url: string;
+  commentsCount: number;
+  likesCount: number; 
+  userHasLiked: boolean; // Esta es la propiedad que se usa en el estado
+  creator?: { handle: string; [key: string]: any }; 
+  description: string; 
+  [key: string]: any;
 }
 
 interface FYPProps {
-  onVideoSelect?: (videoId: string | null) => void;
+  onVideoSelect?: (videoId: string | null, commentsCount: number, likesCount: number, userHasLiked: boolean) => void;
+  onSetFypUpdateLikes?: (func: (videoId: string, newLikesCount: number, newUserHasLiked: boolean) => void) => void;
 }
 
 const viewabilityConfig = {
@@ -32,16 +39,14 @@ const viewabilityConfig = {
     minimumViewTime: 300,
 };
 
-export default function FYP({ onVideoSelect }: FYPProps) {
+export default function FYP({ onVideoSelect, onSetFypUpdateLikes }: FYPProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const videoRefs = useRef<(Video | null)[]>([]); 
     const [isPlaying, setIsPlaying] = useState(true);
     const isFocused = useIsFocused();
 
-    // Estado de datos
     const [data, setData] = useState<VideoItem[]>([]);
     
-    // Referencia de datos para evitar clausuras obsoletas
     const dataRef = useRef<VideoItem[]>([]);
     useEffect(() => {
         dataRef.current = data;
@@ -60,7 +65,39 @@ export default function FYP({ onVideoSelect }: FYPProps) {
 
     const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
 
-    // --- Lógica de Carga ---
+    // 🎯 Mapeo Corregido: Usar item.isLiked
+    const mapVideoData = (item: any): VideoItem => ({
+        id: item.id,
+        url: item.url,
+        commentsCount: item.commentsCount || 0,
+        likesCount: item.likes || 0, 
+        userHasLiked: item.isLiked === true, // 🚨 CLAVE: Usar 'isLiked'
+        creator: item.creator,
+        description: item.description || '', 
+    });
+    
+    const updateVideoLikesInternal = useCallback((videoId: string, newLikesCount: number, newUserHasLiked: boolean) => {
+        setData(prevData => 
+            prevData.map(video => {
+                if (video.id === videoId) {
+                    return {
+                        ...video,
+                        likesCount: newLikesCount,
+                        userHasLiked: newUserHasLiked,
+                    };
+                }
+                return video;
+            })
+        );
+    }, []);
+
+    useEffect(() => {
+        if (onSetFypUpdateLikes) {
+            onSetFypUpdateLikes(updateVideoLikesInternal);
+        }
+    }, [onSetFypUpdateLikes, updateVideoLikesInternal]);
+
+
     const loadMore = useCallback(async (isInitialLoad = false) => {
         if (!API_URL) return;
         if (!isInitialLoad && !hasMore) return;
@@ -78,7 +115,7 @@ export default function FYP({ onVideoSelect }: FYPProps) {
                 params: { page: isInitialLoad ? 0 : page, size: PAGE_SIZE },
             });
             
-            const items = Array.isArray(res.data) ? res.data : [];
+            const items: VideoItem[] = Array.isArray(res.data) ? res.data.map(mapVideoData) : [];
             const startingPage = isInitialLoad ? 1 : page + 1;
 
             setData(prev => {
@@ -92,7 +129,7 @@ export default function FYP({ onVideoSelect }: FYPProps) {
             else setHasMore(true);
 
             if (isInitialLoad && items.length > 0 && onVideoSelect) {
-                onVideoSelect(items[0].id);
+                onVideoSelect(items[0].id, items[0].commentsCount, items[0].likesCount, items[0].userHasLiked);
             }
 
         } catch (e: any) {
@@ -112,13 +149,13 @@ export default function FYP({ onVideoSelect }: FYPProps) {
             const res = await axios.get(`${API_URL}/videos/feed`, {
                 params: { page: 0, size: PAGE_SIZE },
             });
-            const items = Array.isArray(res.data) ? res.data : [];
+            const items: VideoItem[] = Array.isArray(res.data) ? res.data.map(mapVideoData) : [];
             setData(items);
             setPage(1);
             setHasMore(items.length >= PAGE_SIZE);
             
             if (items.length > 0 && onVideoSelect) {
-                onVideoSelect(items[0].id);
+                onVideoSelect(items[0].id, items[0].commentsCount, items[0].likesCount, items[0].userHasLiked);
             }
             setCurrentIndex(0);
         } catch (e: any) {
@@ -134,7 +171,7 @@ export default function FYP({ onVideoSelect }: FYPProps) {
             const res = await axios.get(`${API_URL}/videos/feed`, {
                 params: { page: 0, size: PAGE_SIZE },
             });
-            const items = Array.isArray(res.data) ? res.data : [];
+            const items: VideoItem[] = Array.isArray(res.data) ? res.data.map(mapVideoData) : [];
             setData(prev => {
                 const ids = new Set(prev.map((i: any) => i.id));
                 const newOnes = items.filter((i: any) => !ids.has(i.id));
@@ -155,18 +192,14 @@ export default function FYP({ onVideoSelect }: FYPProps) {
         return () => clearInterval(id);
     }, [isFocused, backgroundRefresh]);
 
-    // --- Control de Reproducción Centralizado ---
     useEffect(() => {
-        // 1. Pausar todos los que NO son el actual
         videoRefs.current.forEach((video, index) => {
             if (video && index !== currentIndex) {
                 video.pauseAsync();
-                // Opcional: si quieres que se reinicien al volver a verlos
-                // video.setPositionAsync(0); 
+                video.setPositionAsync(0); 
             }
         });
 
-        // 2. Manejar el video actual
         const currentVideo = videoRefs.current[currentIndex];
         if (currentVideo) {
             if (isFocused && isPlaying) {
@@ -178,16 +211,21 @@ export default function FYP({ onVideoSelect }: FYPProps) {
     }, [isFocused, isPlaying, currentIndex, data]);
 
 
-    // --- MANEJO DE VISTA ---
     const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
         if (viewableItems.length > 0) {
             const newIndex = viewableItems[0].index;
             
             const currentData = dataRef.current;
-            const vid = currentData[newIndex]?.id;
+            const currentVideo = currentData[newIndex];
+            const vid = currentVideo?.id;
 
             if (vid && onVideoSelect) {
-                onVideoSelect(vid);
+                onVideoSelect(
+                    vid, 
+                    currentVideo.commentsCount || 0,
+                    currentVideo.likesCount || 0,
+                    currentVideo.userHasLiked || false
+                );
             }
 
             setCurrentIndex(newIndex);
@@ -208,23 +246,40 @@ export default function FYP({ onVideoSelect }: FYPProps) {
         showIcon();
     };
 
-    // --- ESTILOS CORREGIDOS ---
     const styles = StyleSheet.create({
         container: { flex: 1, backgroundColor: "black" },
         videoContainer: { 
             height: height, 
-            width: width, // Ancho explícito
+            width: width,
             justifyContent: 'center', 
             alignItems: 'center',
-            backgroundColor: 'black' // Fondo negro explícito
+            backgroundColor: 'black'
         },
         video: { 
-            width: width, // Dimensiones explícitas
+            width: width, 
             height: height,
-            position: 'absolute', // Asegurar posición absoluta para cubrir
+            position: 'absolute',
         },
         controls: { position: "absolute", bottom: 20, left: 20, flexDirection: "row", alignItems: "center", zIndex: 10 },
         centerIcon: { position: "absolute", top: "45%", left: "45%", zIndex: 10 },
+        descriptionContainer: {
+            position: 'absolute',
+            bottom: 100,
+            left: 16,
+            right: 80,
+            zIndex: 10,
+            padding: 8,
+            borderRadius: 8,
+            backgroundColor: 'rgba(0,0,0,0.3)',
+        },
+        descriptionText: {
+            color: 'white',
+            fontSize: 14,
+            lineHeight: 18,
+            textShadowColor: 'rgba(0, 0, 0, 0.7)',
+            textShadowOffset: { width: 1, height: 1 },
+            textShadowRadius: 3,
+        },
         loadingContainer: { flex: 1, backgroundColor: 'black', justifyContent: 'center', alignItems: 'center' }
     });
 
@@ -232,6 +287,17 @@ export default function FYP({ onVideoSelect }: FYPProps) {
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#4CAF50" />
+            </View>
+        );
+    }
+
+    if (loadError && data.length === 0) {
+        return (
+            <View style={styles.loadingContainer}>
+                <Text style={{ color: 'white', marginBottom: 10 }}>{loadError}</Text>
+                <TouchableOpacity onPress={() => loadMore(true)} style={{ padding: 10, backgroundColor: '#4CAF50', borderRadius: 5 }}>
+                    <Text style={{ color: 'white' }}>Reintentar</Text>
+                </TouchableOpacity>
             </View>
         );
     }
@@ -246,12 +312,11 @@ export default function FYP({ onVideoSelect }: FYPProps) {
                             <Video
                                 ref={(ref) => { if (ref) videoRefs.current[index] = ref; }}
                                 source={{ uri: item.url }}
-                                style={styles.video} // Usando estilo con dimensiones fijas
-                                resizeMode={ResizeMode.COVER} // Importante para llenar pantalla
+                                style={styles.video}
+                                resizeMode={ResizeMode.COVER}
                                 isLooping
-                                shouldPlay={false} // Controlado por useEffect
+                                shouldPlay={false}
                                 useNativeControls={false}
-                                // Añadir poster si es necesario para evitar parpadeo negro
                                 // posterSource={{ uri: 'loading_image_url' }}
                             />
 
@@ -266,6 +331,19 @@ export default function FYP({ onVideoSelect }: FYPProps) {
                                     <Ionicons name="play" size={64} color="white" />
                                 </View>
                             )}
+                            
+                            <View style={styles.descriptionContainer}>
+                                {item.creator?.handle && (
+                                    <Text style={[styles.descriptionText, { fontWeight: 'bold', marginBottom: 4 }]}>
+                                        {item.creator.handle}
+                                    </Text>
+                                )}
+                                {item.description && (
+                                    <Text style={styles.descriptionText} numberOfLines={2}>
+                                        {item.description}
+                                    </Text>
+                                )}
+                            </View>
                         </View>
                     </TouchableWithoutFeedback>
                 )}
@@ -276,13 +354,10 @@ export default function FYP({ onVideoSelect }: FYPProps) {
                 snapToInterval={height}
                 snapToAlignment="start"
                 
-                // --- AJUSTES PARA SOLUCIONAR PANTALLA NEGRA ---
                 initialNumToRender={3}
                 windowSize={5}
                 maxToRenderPerBatch={3}
-                // IMPORTANTE: Cambiado a false para evitar que el video se descargue de la GPU
                 removeClippedSubviews={false} 
-                // ----------------------------------------------
 
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfig}
@@ -294,7 +369,7 @@ export default function FYP({ onVideoSelect }: FYPProps) {
                     <RefreshControl refreshing={refreshing} onRefresh={refreshFeed} tintColor="#4CAF50" />
                 }
                 
-                ListFooterComponent={loadingMore ? <ActivityIndicator color="#4CAF50" /> : null}
+                ListFooterComponent={loadingMore ? <ActivityIndicator color="#4CAF50" style={{ marginVertical: 20 }} /> : null}
             />
         </View>
     );

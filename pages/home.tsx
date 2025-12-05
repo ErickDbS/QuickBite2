@@ -1,49 +1,74 @@
-import { View, Text, TouchableWithoutFeedback, Animated, Dimensions } from "react-native";
+import { View, Text, TouchableWithoutFeedback, Animated, Dimensions, Alert } from "react-native";
 import FYP from "../components/fyp";
 import { Ionicons } from "@expo/vector-icons";
 import CommentsComponent from "../components/commentsComponent";
 import { useRef, useState, useCallback } from "react"
 import { useIsFocused } from "@react-navigation/native";
+import axios from "axios";
+import * as SecureStore from 'expo-secure-store';
 
 const { height } = Dimensions.get("window")
 
+const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
+
 interface HomeScreenProps {
   navigation: any;
+}
+
+// Función para obtener el token de seguridad
+async function getToken() {
+    const rawToken = await SecureStore.getItemAsync('accessToken'); 
+    return rawToken ? rawToken.trim() : null;
 }
 
 export default function Home({ navigation }: HomeScreenProps) {
     const isFocused = useIsFocused();
     const [visible, setVisible] = useState(false);
     const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
-    const translateY = useRef(new Animated.Value(height)).current;
-    const [like, setLike] = useState(true);
-    const scale = useRef(new Animated.Value(1)).current;
+    const [commentsCount, setCommentsCount] = useState(0);
 
-    // Callback para recibir el ID del video actual de FYP
-    const handleVideoSelect = useCallback((videoId: string | null) => {
-        // Si el video cambia, cerramos el modal de comentarios
+    // ESTADOS PARA LIKES
+    const [likesCount, setLikesCount] = useState(0); 
+    const [userHasLiked, setUserHasLiked] = useState(false); 
+    const [isLiking, setIsLiking] = useState(false); // Para evitar clicks dobles
+
+    const translateY = useRef(new Animated.Value(height)).current;
+    const scale = useRef(new Animated.Value(1)).current; // Para la animación del corazón
+
+    // 🔑 Referencia a la función de actualización del estado 'data' de FYP
+    const fypUpdateLikesRef = useRef<((videoId: string, newLikesCount: number, newUserHasLiked: boolean) => void) | null>(null);
+
+    // Función para que FYP "inyecte" su lógica de actualización aquí
+    const handleSetFypUpdateLikes = useCallback((func: (videoId: string, newLikesCount: number, newUserHasLiked: boolean) => void) => {
+        fypUpdateLikesRef.current = func;
+    }, []);
+
+    // 🎥 Función llamada cuando cambia el video visible
+    const handleVideoSelect = useCallback((videoId: string | null, count: number = 0, likes: number = 0, hasLiked: boolean = false) => {
         if (selectedVideoId !== videoId) {
             setVisible(false);
-            translateY.setValue(height); // Asegurarse de que la animación se reinicie
+            translateY.setValue(height);
         }
         setSelectedVideoId(videoId);
+        setCommentsCount(count);
+        
+        // ✅ Sincronizar estados del like con el video actual
+        setLikesCount(likes);
+        setUserHasLiked(hasLiked);
+        
     }, [selectedVideoId, height, translateY]);
 
     const openComments = useCallback(() => {
         if (!selectedVideoId) {
-            console.log('No video selected, cannot open comments');
             return;
         }
-        // console.log('Opening comments for video:', selectedVideoId); // Descomentar para debug
         setVisible(true);
         Animated.timing(translateY, {
             toValue: 0,
             duration: 300,
             useNativeDriver: true,
         }).start();
-    }, [selectedVideoId, translateY]); // selectedVideoId como dependencia es crucial
-
-    // openModal ya no es necesario, usar openComments directamente
+    }, [selectedVideoId, translateY]);
 
     const closeModal = useCallback(() => {
         Animated.timing(translateY, {
@@ -53,34 +78,63 @@ export default function Home({ navigation }: HomeScreenProps) {
         }).start(() => setVisible(false));
     }, [translateY]);
 
-    const handleLike = () => {
-        if(!like){
-            setLike(true)
-            Animated.timing(scale, {
-                toValue: 0.9,
-                duration: 100,
-                useNativeDriver: true,
-            }).start(() => {
-                Animated.timing(scale, {
-                toValue: 1,
-                duration: 100,
-                useNativeDriver: true,
-                }).start();
-            });
-        } else {
-            setLike(false)
-            Animated.sequence([
-                Animated.spring(scale, {
-                toValue: 1.2,
+    const handleLike = async () => {
+        if (!selectedVideoId || isLiking || !API_URL) return;
+        
+        setIsLiking(true);
+        const token = await getToken();
+
+        if (!token) {
+            Alert.alert("Inicio de Sesión Requerido", "Debes iniciar sesión para dar 'Me Gusta' a un video.");
+            setIsLiking(false);
+            return;
+        }
+
+        // 1. Optimistic Update (Actualización visual inmediata)
+        const newHasLiked = !userHasLiked;
+        const oldLikesCount = likesCount;
+        const newLikesCount = newHasLiked ? oldLikesCount + 1 : oldLikesCount - 1;
+
+        setUserHasLiked(newHasLiked);
+        setLikesCount(newLikesCount);
+
+        // 2. Animación
+        Animated.sequence([
+            Animated.spring(scale, {
+                toValue: newHasLiked ? 1.2 : 0.9, 
                 friction: 6,
                 useNativeDriver: true,
-                }),
-                Animated.spring(scale, {
+            }),
+            Animated.spring(scale, {
                 toValue: 1,
                 friction: 6,
                 useNativeDriver: true,
-                }),
-            ]).start();
+            }),
+        ]).start();
+
+        // 3. Llamada a la API
+        try {
+            await axios.patch(
+                `${API_URL}/videos/${selectedVideoId}/like`,
+                {}, 
+                {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                }
+            );
+
+            // 4. PERSISTENCIA: Notificar a FYP que actualice su estado 'data' con el nuevo contador
+            if (fypUpdateLikesRef.current) {
+                fypUpdateLikesRef.current(selectedVideoId, newLikesCount, newHasLiked);
+            }
+
+        } catch (error) {
+            console.error("Error toggling like:", error);
+            // 5. Rollback (Revertir el estado si la API falla)
+            setUserHasLiked(!newHasLiked);
+            setLikesCount(oldLikesCount);
+            Alert.alert("Error", "No se pudo registrar el 'Me Gusta'. Inténtalo de nuevo.");
+        } finally {
+            setIsLiking(false);
         }
     }
 
@@ -88,10 +142,12 @@ export default function Home({ navigation }: HomeScreenProps) {
     return(
         <View className="flex-1">
             <View className="flex-1 bg-gray-900">
-                {/* Pasamos isFocused para que FYP sepa si debe reproducir videos */}
-                <FYP onVideoSelect={handleVideoSelect} /> 
+                {/* 🎯 PASAR LA FUNCIÓN DE INYECCIÓN A FYP */}
+                <FYP 
+                    onVideoSelect={handleVideoSelect} 
+                    onSetFypUpdateLikes={handleSetFypUpdateLikes}
+                /> 
 
-                {/* Encabezado */}
                 <View className="absolute top-16 left-0 right-0 z-10">
                     <View className="flex-row justify-center gap-20">
                         <Text className="text-lg text-white font-bold">Siguiendo</Text>
@@ -99,7 +155,6 @@ export default function Home({ navigation }: HomeScreenProps) {
                     </View>
                 </View>
 
-                {/* Iconos de Interacción */}
                 <View className="absolute right-4 bottom-24 gap-6 pb-20">
                     <View className="items-center">
                         <TouchableWithoutFeedback onPress={() => navigation.navigate("UserProfile")}>
@@ -113,38 +168,40 @@ export default function Home({ navigation }: HomeScreenProps) {
                     </View>
 
                     <View className="items-center">
-                        <TouchableWithoutFeedback onPress={handleLike}>
+                        <TouchableWithoutFeedback onPress={handleLike} disabled={isLiking}>
                             <Animated.View
                                 style={{transform: [{scale}] }}>
-                                {like ? (
+                                {userHasLiked ? (
                                     <Ionicons 
-                                        name="heart-outline"
-                                        size={34}
-                                        color="white"
-                                    />
-                                ) : (
-                                    <Ionicons
                                         name="heart"
                                         size={34}
                                         color="red"
+                                    />
+                                ) : (
+                                    <Ionicons
+                                        name="heart-outline"
+                                        size={34}
+                                        color="white"
                                     />
                                 )}
                             </Animated.View>
 
                         </TouchableWithoutFeedback>
 
-                        <Text className="text-white text-xs">123K</Text>
+                        <Text className="text-white text-xs">
+                           {likesCount > 999 ? `${(likesCount / 1000).toFixed(1)}K` : likesCount}
+                        </Text>
                     </View>
                     <View className="items-center">
                         <TouchableWithoutFeedback onPress={openComments} disabled={!selectedVideoId}>
                             <Ionicons
                                 name="chatbubble-outline"
                                 size={34}
-                                color={selectedVideoId ? "white" : "gray"} // Deshabilitado visualmente si no hay video ID
+                                color={selectedVideoId ? "white" : "gray"}
                             />
                         </TouchableWithoutFeedback>
 
-                        <Text className="text-white text-xs">456</Text>
+                        <Text className="text-white text-xs">{commentsCount}</Text>
                     </View>
                     <View className="items-center">
                         <Ionicons
@@ -157,7 +214,6 @@ export default function Home({ navigation }: HomeScreenProps) {
                 </View>
             </View>
 
-            {/* Modal de Comentarios */}
             {visible && (
                 <View className="absolute inset-0 z-20">
                     <TouchableWithoutFeedback onPress={closeModal}>
@@ -178,7 +234,6 @@ export default function Home({ navigation }: HomeScreenProps) {
                             overflow: "hidden",
                         }}
                     >
-                    {/* Aquí se pasa el ID del video al componente de comentarios */}
                     <CommentsComponent 
                         videoId={selectedVideoId}
                         onClose={closeModal}
@@ -186,8 +241,6 @@ export default function Home({ navigation }: HomeScreenProps) {
                     </Animated.View>
                 </View>
             )}
-
-            
         </View>
     )
 }
