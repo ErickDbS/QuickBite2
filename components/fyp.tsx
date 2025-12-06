@@ -25,13 +25,15 @@ interface VideoItem {
   commentsCount: number;
   likesCount: number;
   userHasLiked: boolean;
-  creator?: { handle: string; [key: string]: any };
+  // Asumimos que creator tiene una propiedad 'id' para el perfil
+  creator?: { id: string; handle: string; [key: string]: any }; 
   description: string;
   [key: string]: any;
 }
 
 interface FYPProps {
-  onVideoSelect?: (videoId: string | null, commentsCount: number, likesCount: number, userHasLiked: boolean) => void;
+  // 🚨 CAMBIO CRÍTICO: Añadido creatorId como quinto parámetro
+  onVideoSelect?: (videoId: string | null, commentsCount: number, likesCount: number, userHasLiked: boolean, creatorId: string | null) => void; 
   onSetFypUpdateLikes?: (func: (videoId: string, newLikesCount: number, newUserHasLiked: boolean) => void) => void;
   feedUrl: string; 
   feedType: 'FOR_YOU' | 'FOLLOWING'; 
@@ -67,12 +69,9 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes, feedUrl, feedT
   // 🚨 CORRECCIÓN CLAVE 1: Mapeo de datos (asegurar URL y userHasLiked)
   const mapVideoData = (item: any): VideoItem => ({
     id: item.id,
-    // Asegurar que la URL del video esté disponible (si tu API usa 'videoUrl' o 'source', cámbialo aquí)
     url: item.url || item.videoUrl || '', 
     commentsCount: item.commentsCount || 0,
-    // Usamos 'likes' si viene de 'Para Ti', 'likesCount' si viene de 'Siguiendo'.
     likesCount: item.likesCount || item.likes || 0, 
-    // Esto es crucial para el corazón. Asegúrate de que tu API devuelve 'isLiked: true' o 'false' en el feed.
     userHasLiked: item.isLiked === true, 
     creator: item.creator,
     description: item.description || '',
@@ -159,7 +158,14 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes, feedUrl, feedT
       setHasMore(items.length >= PAGE_SIZE);
 
       if (isInitialLoad && items.length > 0 && onVideoSelect) {
-        onVideoSelect(items[0].id, items[0].commentsCount, items[0].likesCount, items[0].userHasLiked);
+        onVideoSelect(
+          items[0].id, 
+          items[0].commentsCount, 
+          items[0].likesCount, 
+          items[0].userHasLiked,
+          // 🚨 ADICIÓN CRÍTICA 1
+          items[0].creator?.id || null 
+        );
       }
     } catch (e: any) {
       console.error("Error loading feed:", e?.message, e.response?.status);
@@ -196,7 +202,14 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes, feedUrl, feedT
       setHasMore(items.length >= PAGE_SIZE);
 
       if (items.length > 0 && onVideoSelect) {
-        onVideoSelect(items[0].id, items[0].commentsCount, items[0].likesCount, items[0].userHasLiked);
+        onVideoSelect(
+          items[0].id, 
+          items[0].commentsCount, 
+          items[0].likesCount, 
+          items[0].userHasLiked,
+          // 🚨 ADICIÓN CRÍTICA 2
+          items[0].creator?.id || null
+        );
       }
       setCurrentIndex(0);
     } catch (e: any) {
@@ -280,7 +293,9 @@ export default function FYP({ onVideoSelect, onSetFypUpdateLikes, feedUrl, feedT
           vid,
           currentVideo.commentsCount || 0,
           currentVideo.likesCount || 0,
-          currentVideo.userHasLiked || false
+          currentVideo.userHasLiked || false,
+          // 🚨 ADICIÓN CRÍTICA 3
+          currentVideo.creator?.id || null 
         );
       }
 

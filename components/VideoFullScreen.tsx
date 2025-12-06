@@ -9,6 +9,7 @@ import {
   Dimensions,
   Alert,
   StyleSheet,
+  SafeAreaView,
 } from "react-native";
 import { Video, ResizeMode } from "expo-av";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -17,19 +18,19 @@ import axios from "axios";
 import CommentsComponent from "../components/commentsComponent";
 import * as SecureStore from "expo-secure-store";
 
-const { height } = Dimensions.get("window");
+const { height, width } = Dimensions.get("window");
+const HORIZONTAL_PADDING = 12;
 
 interface VideoData {
     id: string;
     url: string;
     description: string;
-    likes: number;
+    likes: number; 
     commentsCount: number; 
     creator: {
         handle: string;
-        // ...
     };
-    // ...
+    isLikedByUser?: boolean; 
 }
 
 export default function VideoFullScreen() {
@@ -46,13 +47,11 @@ export default function VideoFullScreen() {
 
   const [visible, setVisible] = useState(false);
   const translateY = useRef(new Animated.Value(height)).current;
+  
+  const [localLikesCount, setLocalLikesCount] = useState(0);
   const [isLiked, setIsLiked] = useState(false); 
+  const [isLiking, setIsLiking] = useState(false); 
   const scale = useRef(new Animated.Value(1)).current;
-
-  // ... (getToken y useEffect para fetchVideoData, que ya están correctos)
-  // ... (openComments, closeModal, handleLike, que ya están correctos)
-
-  // -----------------------------------------------------
 
   const getToken = async () => {
     try {
@@ -94,14 +93,14 @@ export default function VideoFullScreen() {
         
         if (data?.url && typeof data.url === 'string') {
           setVideoData(data);
-          // 🚨 Aquí podrías inicializar isLiked si tu backend devuelve si el usuario ya le dio like
+          setLocalLikesCount(data.likes || 0);
+          setIsLiked(data.isLikedByUser || false); 
         } else {
           throw new Error("URL del video no encontrada o datos incompletos.");
         }
       } catch (err: any) {
         console.error("Error obteniendo el video:", err.response?.data || err.message);
         setError("No se pudo cargar el video. Inténtalo más tarde.");
-        Alert.alert("Error de Carga", "No se pudo obtener el video o la URL.");
       } finally {
         setLoading(false);
       }
@@ -112,33 +111,99 @@ export default function VideoFullScreen() {
 
 
   const openComments = useCallback(() => {
+    // Si el video está reproduciéndose, pausarlo al abrir el modal
+    if (videoRef.current && status.isPlaying) {
+        videoRef.current.pauseAsync();
+    }
+
     setVisible(true);
     Animated.timing(translateY, {
       toValue: 0,
       duration: 300,
       useNativeDriver: true,
     }).start();
-  }, [translateY]);
+  }, [translateY, status.isPlaying]);
 
   const closeModal = useCallback(() => {
+    // Reanudar la reproducción al cerrar el modal
+    if (videoRef.current && !status.isPlaying && status.positionMillis > 0) {
+        videoRef.current.playAsync();
+    }
+    
     Animated.timing(translateY, {
       toValue: height,
       duration: 300,
       useNativeDriver: true,
     }).start(() => setVisible(false));
-  }, [translateY]);
+  }, [translateY, status.isPlaying, status.positionMillis]);
 
-  const handleLike = () => {
-    // 🚨 (Lógica de like/unlike al backend)
-    if (!isLiked) {
-      setIsLiked(true);
-      Animated.timing(scale, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-    } else {
-      setIsLiked(false);
-      Animated.timing(scale, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  const handleLike = async () => {
+    if (isLiking || !videoId) return;
+
+    setIsLiking(true);
+    const token = await getToken();
+
+    if (!token) {
+        Alert.alert("Acceso denegado", "Debes iniciar sesión para dar 'Me Gusta'.");
+        setIsLiking(false);
+        return;
+    }
+
+    const newIsLiked = !isLiked;
+    const oldLikesCount = localLikesCount;
+    const newLikesCount = newIsLiked ? oldLikesCount + 1 : oldLikesCount - 1;
+
+    // 🚨 Optimistic UI Update: Esto hace que el corazón se ponga rojo inmediatamente.
+    setIsLiked(newIsLiked);
+    setLocalLikesCount(newLikesCount);
+
+    // Animación de Like
+    Animated.sequence([
+      Animated.spring(scale, {
+        toValue: newIsLiked ? 1.3 : 1.0,
+        friction: 4,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scale, {
+        toValue: 1.0,
+        friction: 4,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    try {
+        // 🚨 CRÍTICO: Asegurarse de que el endpoint no devuelve un error silencioso o 204 No Content
+        const apiResponse = await axios.patch(
+            `${process.env.EXPO_PUBLIC_AWS_API_URL}/videos/${videoId}/like`,
+            {},
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        console.log("Like API response status:", apiResponse.status);
+        
+    } catch (err: any) {
+        // 🚨 CRÍTICO: Registramos el error de la respuesta HTTP
+        console.error("Error al registrar el like:", err.response?.status, err.response?.data || err.message);
+        Alert.alert("Error", "No se pudo registrar el 'Me Gusta'.");
+        
+        // 🚨 Revertir el estado
+        setIsLiked(!newIsLiked); 
+        setLocalLikesCount(oldLikesCount);
+        Animated.timing(scale, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    } finally {
+        setIsLiking(false);
     }
   };
-  // -----------------------------------------------------
+
+  const togglePlayPause = () => {
+    if (!videoRef.current || !status.isLoaded) return;
+
+    if (status.isPlaying) {
+      videoRef.current.pauseAsync();
+    } else {
+      videoRef.current.playAsync();
+    }
+  };
+
 
   if (loading) {
     return (
@@ -166,22 +231,21 @@ export default function VideoFullScreen() {
   }
   
   const shouldPlay = !status.didJustFinish && !visible;
-  const { url: videoUrl, likes = 0, commentsCount = 0, creator, description } = videoData;
+  const { url: videoUrl, creator, description } = videoData;
+  const commentsCount = videoData.commentsCount || 0;
 
 
   return (
     <View style={styles.container}>
-      {/* 🚨 CRÍTICO: El contenedor del video envuelve al Video y se le aplica Z-index 0 o bajo */}
+      {/* 1. REPRODUCTOR DE VIDEO */}
       <TouchableWithoutFeedback 
-        style={styles.videoWrapper}
-        onPress={() => {
-          if (videoRef.current && status.isLoaded) {
-            status.isPlaying ? videoRef.current.pauseAsync() : videoRef.current.playAsync();
-          }
-        }}
+        // 🚨 CRÍTICO: Usamos 'containerPressable' para asegurar que cubra toda la pantalla
+        style={styles.containerPressable} 
+        onPress={togglePlayPause}
       >
         <Video
           ref={videoRef}
+          // El video debe cubrir todo el espacio
           style={styles.videoPlayer}
           source={{ uri: videoUrl }}
           useNativeControls={false}
@@ -194,35 +258,32 @@ export default function VideoFullScreen() {
       </TouchableWithoutFeedback>
 
 
-      {/* 🚨 CONTENEDOR DE LA INTERFAZ: Usamos 'absolute fill' para posicionar el resto de la UI */}
-      <View style={styles.uiOverlay}> 
+      {/* 2. CAPA DE SUPERPOSICIÓN DE LA UI (UIOverlay) */}
+      <View style={styles.uiOverlay} pointerEvents="box-none"> 
         
         {/* Botón de volver */}
-        <TouchableOpacity
-          className="absolute top-12 left-5 z-50 p-2 bg-black/30 rounded-full"
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="chevron-back" size={30} color="white" />
-        </TouchableOpacity>
+        <SafeAreaView style={styles.backButtonContainer}>
+             <TouchableOpacity
+                className="p-2 bg-black/30 rounded-full"
+                onPress={() => navigation.goBack()}
+            >
+                <Ionicons name="chevron-back" size={30} color="white" />
+            </TouchableOpacity>
+        </SafeAreaView>
 
-        {/* Información del creador y descripción */}
-        <View className="absolute left-4 bottom-12 pb-10 z-10 w-2/3">
+
+        {/* INFORMACIÓN DEL CREADOR Y DESCRIPCIÓN (Parte inferior izquierda) */}
+        <View style={styles.contentContainerLeft}> 
             <Text className="text-white font-bold text-lg mb-1">{creator?.handle || '@usuario'}</Text>
             <Text className="text-white text-base">{description}</Text>
         </View>
 
-        {/* Barra de iconos laterales (Likes/Comentarios/Compartir) */}
-        <View className="absolute right-4 bottom-12 gap-6 pb-10 z-10">
+        {/* BARRA DE ICONOS LATERALES (Parte inferior derecha, vertical) */}
+        <View style={styles.iconsContainerRight}> 
           
-          <View className="items-center">
-            <TouchableWithoutFeedback>
-              <Ionicons name="person-circle-outline" size={34} color="white" />
-            </TouchableWithoutFeedback>
-            <Text className="text-white text-xs">Perfil</Text>
-          </View>
-
-          <View className="items-center">
-            <TouchableWithoutFeedback onPress={handleLike}>
+          <View style={styles.iconItem}>
+            {/* 🚨 Botón de Like */}
+            <TouchableWithoutFeedback onPress={handleLike} disabled={isLiking}>
               <Animated.View style={{ transform: [{ scale }] }}>
                 {isLiked ? (
                   <Ionicons name="heart" size={34} color="red" />
@@ -231,17 +292,17 @@ export default function VideoFullScreen() {
                 )}
               </Animated.View>
             </TouchableWithoutFeedback>
-            <Text className="text-white text-xs">{likes > 999 ? `${(likes / 1000).toFixed(1)}K` : likes}</Text>
+            <Text className="text-white text-xs">{localLikesCount > 999 ? `${(localLikesCount / 1000).toFixed(1)}K` : localLikesCount}</Text>
           </View>
 
-          <View className="items-center">
+          <View style={styles.iconItem}>
             <TouchableWithoutFeedback onPress={openComments}>
               <Ionicons name="chatbubble-outline" size={34} color="white" />
             </TouchableWithoutFeedback>
             <Text className="text-white text-xs">{commentsCount > 999 ? `${(commentsCount / 1000).toFixed(1)}K` : commentsCount}</Text>
           </View>
 
-          <View className="items-center">
+          <View style={styles.iconItem}>
             <Ionicons name="share-social-outline" size={34} color="white" />
             <Text className="text-white text-xs">Compartir</Text>
           </View>
@@ -253,10 +314,17 @@ export default function VideoFullScreen() {
             <ActivityIndicator size="large" color="white" />
           </View>
         )}
+        
+        {/* Indicador de Pausa/Reproducción */}
+        {!status.isPlaying && !status.didJustFinish && !loading && !status.isBuffering && (
+            <View style={styles.playPauseIndicator}>
+                 <Ionicons name="play" size={80} color="white" style={{ opacity: 0.6 }} />
+            </View>
+        )}
 
       </View>
       
-      {/* Modal de comentarios (DEBE ESTAR FUERA DEL UIOverlay para su propia gestión de Z-index) */}
+      {/* 3. MODAL DE COMENTARIOS */}
       {visible && (
         <View style={styles.modalOverlay}>
           <TouchableWithoutFeedback onPress={closeModal}>
@@ -288,20 +356,55 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
     },
-    // Contenedor principal del video
-    videoWrapper: {
-        flex: 1,
-        zIndex: 0, // Z-index bajo para que la UI flote encima
+    // 🚨 CRÍTICO: Nuevo estilo para asegurar que el Touchable cubra todo
+    containerPressable: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 5, // Asegura que esté por encima del video
     },
-    // Componente Video
     videoPlayer: {
-        width: Dimensions.get('window').width,
-        height: Dimensions.get('window').height,
+        // Asegura que ocupe todo el espacio
+        width: width,
+        height: height,
+        position: 'absolute',
+        zIndex: 1, // El video está detrás del Pressable
     },
-    // 🚨 CRÍTICO: Contenedor para toda la UI flotante
     uiOverlay: {
-        ...StyleSheet.absoluteFillObject, // Hace que ocupe todo el espacio y flote encima
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 10, // La capa de UI está sobre el Pressable
+        paddingBottom: 90, 
+    },
+    playPauseIndicator: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 11,
+        pointerEvents: 'none',
+    },
+    backButtonContainer: {
+        position: 'absolute',
+        top: 0,
+        left: HORIZONTAL_PADDING,
+        zIndex: 50,
+    },
+    contentContainerLeft: {
+        position: 'absolute',
+        left: HORIZONTAL_PADDING,
+        bottom: 0, 
+        width: width * 0.65,
         zIndex: 10,
+        paddingBottom: 100,
+    },
+    iconsContainerRight: {
+        position: 'absolute',
+        right: HORIZONTAL_PADDING,
+        bottom: 0, 
+        gap: 24,
+        alignItems: 'center',
+        zIndex: 10,
+        paddingBottom: 250,
+    },
+    iconItem: {
+        alignItems: 'center',
     },
     modalOverlay: {
         position: 'absolute',
@@ -309,7 +412,7 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: 50, // Z-index alto para el modal
+        zIndex: 50,
     },
     modalBackground: {
         flex: 1,

@@ -1,3 +1,6 @@
+// screens/Profile.tsx
+
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   Animated,
   ScrollView,
@@ -6,28 +9,33 @@ import {
   View,
   Dimensions,
   TouchableWithoutFeedback,
+  ActivityIndicator,
 } from "react-native";
 import { Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useRef, useState } from "react";
 import Settings from "../components/settings";
 import VideoGrid from "../components/videoGrid";
+import FollowListModal from "../components/followModal";
 import axios from "axios";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as SecureStore from "expo-secure-store";
+import { useFocusEffect } from "@react-navigation/native"; // Importar useFocusEffect
+
+const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
+const userImgPlaceholder = require("../assets/user.png");
 
 export default function Profile({ navigation }: any) {
   const { height } = Dimensions.get("window");
+  
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [modalType, setModalType] = useState<'following' | 'followers'>('following');
+  
   const [visible, setVisible] = useState(false);
   const translateY = useRef(new Animated.Value(height)).current;
   const [user, setUser] = useState<any>();
   const [loading, setLoading] = useState(true);
-  const userImg = require("../assets/user.png");
 
-  useEffect(() => {
-    getMyProfile();
-  }, []);
-
+  // Función para obtener el token
   const getToken = async () => {
     try {
       const token = await SecureStore.getItemAsync("accessToken");
@@ -38,7 +46,12 @@ export default function Profile({ navigation }: any) {
     }
   };
 
-  const openModal = () => {
+  const handleOpenModal = (type: 'following' | 'followers') => {
+    setModalType(type);
+    setIsModalVisible(true);
+  };
+  
+  const openSettingsModal = () => {
     setVisible(true);
     Animated.timing(translateY, {
       toValue: 0,
@@ -47,26 +60,31 @@ export default function Profile({ navigation }: any) {
     }).start();
   };
 
-  const closeModal = () => {
+  const closeSettingsModal = () => {
     Animated.timing(translateY, {
       toValue: height,
       duration: 300,
       useNativeDriver: true,
     }).start(() => setVisible(false));
   };
+  
+  // 🚨 REFACTORIZACIÓN CLAVE: getMyProfile ahora es más simple
+  // Le pasaremos un argumento `showLoading` para controlar el spinner.
+  const getMyProfile = useCallback(async (showLoading: boolean = true) => {
+    
+    // 1. Mostrar spinner solo en la carga inicial o si se especifica
+    if (showLoading && !user) setLoading(true); 
 
-  const getMyProfile = async () => {
     try {
       const token = await getToken();
 
       if (!token) {
         console.error("No hay token, el usuario no está autenticado");
-        setLoading(false);
         return;
       }
 
       const res = await axios.get(
-        `${process.env.EXPO_PUBLIC_AWS_API_URL}/user`,
+        `${API_URL}/user`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -76,24 +94,46 @@ export default function Profile({ navigation }: any) {
 
       if (res.status === 200 || res.status === 201) {
         setUser(res.data);
-        console.log("Datos:", res.data);
       }
     } catch (error) {
       console.error("Error en la petición:", error);
-      if (axios.isAxiosError(error)) {
-        console.error("Detalle del error:", error.response?.data);
-      }
     } finally {
       setLoading(false);
     }
-  };
+  // 🚨 Dependencia simple: Solo de la API
+  }, [API_URL]); 
+
+  // 🚨 CORRECCIÓN: Usamos useFocusEffect para recargar al volver
+  useFocusEffect(
+    useCallback(() => {
+      // 1. Cargar el perfil. Le pasamos 'false' para que no muestre el spinner
+      //    si ya tenemos datos, logrando una actualización 'silenciosa' o rápida.
+      getMyProfile(false); 
+      
+      // Retornamos una función de limpieza si fuera necesario
+      return () => {};
+      
+    // 🚨 Dependencia de getMyProfile.
+    }, [getMyProfile]) 
+  ); 
+  
+  // ---
 
   if (loading) {
     return (
       <View className="flex-1 bg-black justify-center items-center">
-        <Text className="text-white">Cargando perfil...</Text>
+        <ActivityIndicator size="large" color="white" />
+        <Text className="text-white mt-2">Cargando perfil...</Text>
       </View>
     );
+  }
+  
+  if (!user) {
+    return (
+        <View className="flex-1 bg-black justify-center items-center">
+          <Text className="text-red-500">Error: No se pudo cargar la información del usuario.</Text>
+        </View>
+      );
   }
 
   return (
@@ -103,7 +143,7 @@ export default function Profile({ navigation }: any) {
           <View className="flex-row justify-center items-center bg-gray-900 p-4">
             <Text className="text-lg text-white font-bold">{user?.alias}</Text>
             <View className="absolute right-4">
-              <TouchableOpacity onPress={openModal}>
+              <TouchableOpacity onPress={openSettingsModal}>
                 <Ionicons name="options-outline" size={24} color={"white"} />
               </TouchableOpacity>
             </View>
@@ -114,24 +154,34 @@ export default function Profile({ navigation }: any) {
           <View>
             <Image
               className="w-24 h-24 rounded-full mx-auto bg-slate-700"
-              source={user.image || userImg}
+              source={user.image ? { uri: user.image } : userImgPlaceholder}
             />
-            <Text className="text-white text-center pt-4">{user?.handle}</Text>
+            <Text className="text-white text-center pt-4 italic">@{user?.handle}</Text>
           </View>
 
+          {/* Estadísticas */}
           <View className="flex-row justify-center gap-6 pt-4">
-            <View className="flex-col items-center">
+            
+            <TouchableOpacity 
+              className="flex-col items-center"
+              onPress={() => handleOpenModal('following')}
+            >
               <Text className="text-white font-bold">
                 {user?.followingCount}
               </Text>
               <Text className="text-white">Seguidos</Text>
-            </View>
-            <View className="flex-col items-center">
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              className="flex-col items-center"
+              onPress={() => handleOpenModal('followers')}
+            >
               <Text className="text-white font-bold">
                 {user?.followersCount}
               </Text>
               <Text className="text-white">Seguidores</Text>
-            </View>
+            </TouchableOpacity>
+            
             <View className="flex-col items-center">
               <Text className="text-white font-bold">{user?.likes}</Text>
               <Text className="text-white">Me gusta</Text>
@@ -176,9 +226,10 @@ export default function Profile({ navigation }: any) {
         </View>
       </ScrollView>
 
+      {/* Modal de Configuración (Settings) */}
       {visible && (
         <View className="absolute inset-0">
-          <TouchableWithoutFeedback onPress={closeModal}>
+          <TouchableWithoutFeedback onPress={closeSettingsModal}>
             <View className="flex-1 bg-black/50" />
           </TouchableWithoutFeedback>
 
@@ -199,6 +250,17 @@ export default function Profile({ navigation }: any) {
             <Settings navigation={navigation} />
           </Animated.View>
         </View>
+      )}
+      
+      {/* Modal de Seguidores/Seguidos (FollowListModal) */}
+      {isModalVisible && (
+          <FollowListModal
+              isVisible={true}
+              onClose={() => setIsModalVisible(false)}
+              type={modalType}
+              userId={user?.id}
+              navigation={navigation}
+          />
       )}
     </View>
   );

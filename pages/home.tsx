@@ -26,6 +26,7 @@ export default function Home({ navigation }: HomeScreenProps) {
   const isFocused = useIsFocused();
   const [visible, setVisible] = useState(false);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+  const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null); // 🚨 NUEVO ESTADO
   const [commentsCount, setCommentsCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
   const [userHasLiked, setUserHasLiked] = useState(false);
@@ -42,7 +43,8 @@ export default function Home({ navigation }: HomeScreenProps) {
     fypUpdateLikesRef.current = func;
   }, []);
 
-  const handleVideoSelect = useCallback((videoId: string | null, count: number = 0, likes: number = 0, hasLiked: boolean = false) => {
+  // 🚨 CAMBIO CRÍTICO: Recibe el creatorId
+  const handleVideoSelect = useCallback((videoId: string | null, count: number = 0, likes: number = 0, hasLiked: boolean = false, creatorId: string | null = null) => {
     if (selectedVideoId !== videoId) {
       setVisible(false);
       translateY.setValue(height);
@@ -51,6 +53,7 @@ export default function Home({ navigation }: HomeScreenProps) {
     setCommentsCount(count);
     setLikesCount(likes);
     setUserHasLiked(hasLiked);
+    setSelectedCreatorId(creatorId); // 🚨 Guardar el ID del creador
   }, [selectedVideoId, height, translateY]);
 
   const openComments = useCallback(() => {
@@ -134,12 +137,12 @@ export default function Home({ navigation }: HomeScreenProps) {
     <View className="flex-1">
       <View className="flex-1 bg-gray-900">
         
-        {/* 🚨 Pasar la URL y la pestaña activa a FYP */}
+        {/* Pasar la URL y la pestaña activa a FYP */}
         <FYP 
-          key={activeTab} // 🚨 Usar key para forzar el remount y reset del estado interno de FYP al cambiar de pestaña
+          key={activeTab} // Usar key para forzar el remount y reset del estado interno de FYP al cambiar de pestaña
           feedUrl={feedUrl}
           feedType={activeTab}
-          onVideoSelect={handleVideoSelect} 
+          onVideoSelect={handleVideoSelect} // Usa la función con el creatorId
           onSetFypUpdateLikes={handleSetFypUpdateLikes}
         />
 
@@ -167,10 +170,19 @@ export default function Home({ navigation }: HomeScreenProps) {
         </View>
 
         <View className="absolute right-4 bottom-24 gap-6 pb-20">
-          {/* ... (Botones de acción sin cambios) ... */}
+          
            {/* Profile Button */}
           <View className="items-center">
-            <TouchableWithoutFeedback onPress={() => navigation.navigate("UserProfile")}>
+            <TouchableWithoutFeedback 
+              onPress={() => {
+                if (selectedCreatorId) {
+                  // 🚨 CRÍTICO: Navegar a UserProfile con el ID del creador
+                  navigation.navigate("UserProfile", { userId: selectedCreatorId });
+                } else {
+                    Alert.alert("Error", "No se ha seleccionado un video para ver su perfil.");
+                }
+              }}
+            >
               <Ionicons name="person-circle-outline" size={34} color="white" />
             </TouchableWithoutFeedback>
             <Text className="text-white text-xs">Perfil</Text>
