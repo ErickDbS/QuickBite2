@@ -301,11 +301,6 @@ export default function VideoFullScreen() {
             </TouchableWithoutFeedback>
             <Text className="text-white text-xs">{commentsCount > 999 ? `${(commentsCount / 1000).toFixed(1)}K` : commentsCount}</Text>
           </View>
-
-          <View style={styles.iconItem}>
-            <Ionicons name="share-social-outline" size={34} color="white" />
-            <Text className="text-white text-xs">Compartir</Text>
-          </View>
         </View>
 
         {/* Indicador de carga/buffering */}

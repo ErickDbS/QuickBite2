@@ -1,5 +1,3 @@
-// screens/Profile.tsx
-
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   Animated,
@@ -10,6 +8,7 @@ import {
   Dimensions,
   TouchableWithoutFeedback,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,7 +18,8 @@ import FollowListModal from "../components/followModal";
 import axios from "axios";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as SecureStore from "expo-secure-store";
-import { useFocusEffect } from "@react-navigation/native"; // Importar useFocusEffect
+import { useFocusEffect } from "@react-navigation/native"; 
+import * as ImagePicker from 'expo-image-picker'; 
 
 const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
 const userImgPlaceholder = require("../assets/user.png");
@@ -34,8 +34,9 @@ export default function Profile({ navigation }: any) {
   const translateY = useRef(new Animated.Value(height)).current;
   const [user, setUser] = useState<any>();
   const [loading, setLoading] = useState(true);
+  const [isUploading, setIsUploading] = useState(false); 
+  const [imageVersion, setImageVersion] = useState(0);
 
-  // Función para obtener el token
   const getToken = async () => {
     try {
       const token = await SecureStore.getItemAsync("accessToken");
@@ -68,57 +69,116 @@ export default function Profile({ navigation }: any) {
     }).start(() => setVisible(false));
   };
   
-  // 🚨 REFACTORIZACIÓN CLAVE: getMyProfile ahora es más simple
-  // Le pasaremos un argumento `showLoading` para controlar el spinner.
   const getMyProfile = useCallback(async (showLoading: boolean = true) => {
-    
-    // 1. Mostrar spinner solo en la carga inicial o si se especifica
     if (showLoading && !user) setLoading(true); 
 
     try {
       const token = await getToken();
-
-      if (!token) {
-        console.error("No hay token, el usuario no está autenticado");
-        return;
-      }
+      if (!token) return;
 
       const res = await axios.get(
         `${API_URL}/user`,
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         }
       );
 
       if (res.status === 200 || res.status === 201) {
-        setUser(res.data);
+        const profile = res.data;
+
+        const totalLikes = profile.videos?.reduce(
+          (sum: number, vid: any) => sum + (vid.likes || 0),
+          0
+        ) || 0;
+
+        profile.likes = totalLikes; 
+        setUser(profile);
       }
+
     } catch (error) {
       console.error("Error en la petición:", error);
     } finally {
       setLoading(false);
     }
-  // 🚨 Dependencia simple: Solo de la API
-  }, [API_URL]); 
+  }, [API_URL, user]); 
 
-  // 🚨 CORRECCIÓN: Usamos useFocusEffect para recargar al volver
+  const changeProfilePhoto = async (imageUri: string) => {
+    setIsUploading(true);
+    try {
+        const token = await getToken();
+        if (!token) {
+            Alert.alert("Error", "No estás autenticado.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', {
+            uri: imageUri,
+            name: `profile-${user.id}-${Date.now()}.jpg`,
+            type: 'image/jpeg', 
+        } as any);
+
+        const res = await axios.post(
+            `${API_URL}/user/change-photo`,
+            formData,
+            {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'multipart/form-data',
+                },
+            }
+        );
+
+        if (res.status === 200) {
+          console.log('datos del usuario: ', res.data)
+            const newImageUri = res.data.imageURl; // ✅ usar la propiedad correcta
+              setUser((prevUser: any) => ({
+                ...prevUser,
+                imageURl: newImageUri,
+              }));
+
+            setImageVersion(prev => prev + 1); // forzar re-render
+            Alert.alert("Éxito", "La foto de perfil ha sido actualizada.");
+        } else {
+             Alert.alert("Error", "No se pudo actualizar la foto de perfil.");
+        }
+
+    } catch (error) {
+        console.error("Error al subir la imagen:", error);
+        Alert.alert("Error", "Ocurrió un error al intentar subir la foto.");
+    } finally {
+        setIsUploading(false);
+    }
+  };
+
+  const handleImagePick = async () => {
+    if (isUploading) return;
+    
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permiso Requerido', 'Necesitas otorgar permiso para acceder a la galería.');
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.5,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const selectedUri = result.assets[0].uri;
+      changeProfilePhoto(selectedUri);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
-      // 1. Cargar el perfil. Le pasamos 'false' para que no muestre el spinner
-      //    si ya tenemos datos, logrando una actualización 'silenciosa' o rápida.
       getMyProfile(false); 
-      
-      // Retornamos una función de limpieza si fuera necesario
-      return () => {};
-      
-    // 🚨 Dependencia de getMyProfile.
     }, [getMyProfile]) 
   ); 
   
-  // ---
-
   if (loading) {
     return (
       <View className="flex-1 bg-black justify-center items-center">
@@ -151,17 +211,29 @@ export default function Profile({ navigation }: any) {
         </View>
 
         <View className="flex-1 pt-20 mt-20">
-          <View>
-            <Image
-              className="w-24 h-24 rounded-full mx-auto bg-slate-700"
-              source={user.image ? { uri: user.image } : userImgPlaceholder}
-            />
-            <Text className="text-white text-center pt-4 italic">@{user?.handle}</Text>
-          </View>
+          <TouchableOpacity
+            className="w-24 h-24 mx-auto relative" 
+            onPress={handleImagePick}
+            disabled={isUploading}
+          >
+              <Image
+                key={imageVersion} 
+                className="w-24 h-24 rounded-full bg-slate-700"
+                source={user.imageURl ? { uri: user.imageURl } : userImgPlaceholder}
+              />
 
-          {/* Estadísticas */}
+            <View className="absolute bottom-0 right-0 p-1 bg-red-500 rounded-full border-2 border-gray-900">
+              {isUploading ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <FontAwesome name="pencil" size={12} color="white" />
+              )}
+            </View>
+          </TouchableOpacity>
+
+          <Text className="text-white text-center pt-4 italic">{user?.handle}</Text>
+
           <View className="flex-row justify-center gap-6 pt-4">
-            
             <TouchableOpacity 
               className="flex-col items-center"
               onPress={() => handleOpenModal('following')}
@@ -188,31 +260,13 @@ export default function Profile({ navigation }: any) {
             </View>
           </View>
 
-          <View className="flex-row justify-center gap-1 pt-4">
-            <View>
-              <TouchableOpacity>
-                <Text className="text-white text-md bg-green-600 rounded-lg p-3 font-bold w-[8rem] text-center">
-                  Editar Perfil
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <View>
-              <TouchableOpacity
-                onPress={() => navigation.navigate("VideoGrid")}
-              >
-                <Text className="text-white text-md bg-gray-600 rounded-lg p-2 font-bold w-[3rem] text-center">
-                  <FontAwesome name="heart" size={22} color="white" />
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
           <View className="items-center pt-4">
             <Text className="text-white text-center text-md font-bold">
               Mis videos
             </Text>
           </View>
         </View>
+
         <View className="pt-4">
           {user?.videos?.length > 0 ? (
             <VideoGrid videos={user?.videos} navigation={navigation} />
@@ -226,7 +280,6 @@ export default function Profile({ navigation }: any) {
         </View>
       </ScrollView>
 
-      {/* Modal de Configuración (Settings) */}
       {visible && (
         <View className="absolute inset-0">
           <TouchableWithoutFeedback onPress={closeSettingsModal}>
@@ -252,7 +305,6 @@ export default function Profile({ navigation }: any) {
         </View>
       )}
       
-      {/* Modal de Seguidores/Seguidos (FollowListModal) */}
       {isModalVisible && (
           <FollowListModal
               isVisible={true}

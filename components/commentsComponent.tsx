@@ -2,10 +2,9 @@ import {
   Text, 
   View, 
   ScrollView, 
-  TouchableWithoutFeedback, 
+  TouchableOpacity, 
   Image, 
   TextInput, 
-  TouchableOpacity, 
   Keyboard,
   Animated,
   Platform,
@@ -18,15 +17,16 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import * as SecureStore from 'expo-secure-store'; 
 
-const icon = require("../assets/profile-example.png");
 const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
+// NOTA: Si usas 'require', asegúrate de que la ruta del placeholder sea correcta.
+// const userImgPlaceholder = require("../assets/user.png"); 
 
 // --- INTERFACES ---
 interface Answer {
   id: number;
   user: {
     username: string;
-    profileImage?: string;
+    profileImage?: string; // URL de la imagen de perfil
   };
   content: string;
   createdAt: string;
@@ -36,7 +36,7 @@ interface Comment {
   id: number;
   user: {
     username: string;
-    profileImage?: string;
+    profileImage?: string; // URL de la imagen de perfil
   };
   content: string;
   createdAt: string;
@@ -45,7 +45,6 @@ interface Comment {
   userReaction?: 'LIKE' | 'DISLIKE' | null;
   answers?: Answer[]; 
   answerCount?: number; 
-  // 🆕 Añadidos para manejar la carga y visualización de respuestas
   showAnswers?: boolean; 
   isAnswersLoading?: boolean;
 }
@@ -60,6 +59,40 @@ async function getToken() {
     return rawToken ? rawToken.trim() : null;
 }
 
+// ----------------------------------------------------------------------
+// Componente funcional para renderizar la imagen o placeholder
+const ProfileAvatar = ({ imageUrl, size = 44 }: { imageUrl?: string; size?: number }) => {
+    // Si la URL existe y es una cadena válida, la usamos
+    if (imageUrl && typeof imageUrl === 'string' && imageUrl.length > 0) {
+        // console.log("[DEBUG AVATAR] Intentando cargar:", imageUrl); // Puedes descomentar esto si aún falla
+
+        // 🛑 Importante: En React Native, las imágenes externas SIEMPRE requieren HTTPS.
+        // Si tu URL de S3 no tiene HTTPS, debes configurar excepciones en iOS/Android.
+        return (
+            <Image
+                source={{ uri: imageUrl }}
+                style={{ 
+                    width: size, 
+                    height: size, 
+                    borderRadius: size / 2, 
+                    marginRight: 10, 
+                    backgroundColor: '#333' 
+                }}
+                // En caso de error de carga, fallback al icono
+                onError={(e) => {
+                    console.error("Error cargando imagen de perfil (URI):", imageUrl, e.nativeEvent.error);
+                }}
+            />
+        );
+    }
+    // Si no hay URL, mostramos el placeholder/icono
+    return (
+        <Ionicons name="person-circle-outline" size={size} color="white" style={{ marginRight: 10 }} />
+    );
+};
+// ----------------------------------------------------------------------
+
+
 export default function CommentsComponent({ videoId, onClose }: CommentsComponentProps) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,14 +101,13 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [isLogged, setIsLogged] = useState(false); 
-
   const [replyingTo, setReplyingTo] = useState<Comment | null>(null);
 
   const inputRef = useRef<TextInput>(null);
   const [keyboardHeight] = useState(new Animated.Value(0));
 
   
-  // 🆕 FUNCIÓN PARA CARGAR RESPUESTAS INDIVIDUALES (Llamada al endpoint específico)
+  // FUNCIÓN PARA CARGAR RESPUESTAS INDIVIDUALES
   const fetchAnswersForComment = useCallback(async (commentId: number, shouldShow: boolean = true) => {
     if (!API_URL) return;
 
@@ -88,31 +120,25 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
         const config = token ? { headers: { 'Authorization': `Bearer ${token}` } } : {};
         
         const url = `${API_URL}/answers/comment/${commentId}?page=0&size=10`;
-        
-        // 🔍 LOG 1: Intentando GET
-        console.log(`[ANSWERS FETCH] Intentando GET: ${url} (Token presente: ${!!token})`);
-        
         const response = await axios.get(url, config);
         
-        // 🔍 LOG 2: Respuesta bruta recibida (Aquí debería aparecer la data que me enviaste)
-        console.log(`[ANSWERS FETCH] Respuesta recibida para Comentario ${commentId}:`, response.data);
+        const fetchedAnswers = Array.isArray(response.data) ? response.data.map((ans: any) => {
+            const profileImageUrl = ans.creator?.imageURl;
+            // 🛑 DEPURACIÓN: Imprime la URL de la respuesta anidada
+            console.log(`[DEBUG AVATAR - ANSWER] URL recibida para ${ans.creator?.handle || 'Anónimo'}:`, profileImageUrl);
 
-        
-        const fetchedAnswers = Array.isArray(response.data) ? response.data.map((ans: any) => ({
-            id: ans.id,
-            user: {
-                username: ans.creator?.handle || 'Anónimo',
-                profileImage: ans.creator?.profileImage
-            },
-            content: ans.answer || ans.content, 
-            createdAt: ans.createdAt
-        })) : [];
-
-        // 🟢 LOG 3: Array de Answers mapeado (Verifica esta estructura) 🟢
-        console.log(`[ANSWERS MAPPED] Array de Answers listo:`, fetchedAnswers);
+            return {
+                id: ans.id,
+                user: {
+                    username: ans.creator?.handle || 'Anónimo',
+                    profileImage: profileImageUrl 
+                },
+                content: ans.answer || ans.content, 
+                createdAt: ans.createdAt
+            };
+        }) : [];
 
 
-        // Actualizar el estado del comentario padre con las respuestas
         setComments(prev => 
             prev.map(c => 
                 c.id === commentId 
@@ -121,13 +147,12 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
                         answers: fetchedAnswers, 
                         showAnswers: shouldShow, 
                         isAnswersLoading: false,
-                        answerCount: fetchedAnswers.length // ✅ Asegurarse de actualizar el contador
+                        answerCount: fetchedAnswers.length
                       } 
                     : c
             )
         );
     } catch (error: any) {
-        // 🔍 LOG DE VERIFICACIÓN DE ERROR 🔍
         console.error(`[ANSWERS FETCH] Error al obtener respuestas para Comentario ${commentId}:`, error?.response?.status || error?.message);
 
         setComments(prev => 
@@ -135,9 +160,9 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
         );
     }
   }, []);
-  // ----------------------------------------------------------------------
 
 
+  // FUNCIÓN PRINCIPAL PARA CARGAR COMENTARIOS
   const fetchComments = useCallback(async () => {
 
     if (!videoId || !API_URL) {
@@ -159,31 +184,34 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
           }
       } : {};
 
-      // Endpoint principal que trae los comentarios del video (sin respuestas anidadas)
       const response = await axios.get(
         `${API_URL}/comments/video/${videoId}?page=0&size=10`, 
         config 
       );
       
       if (response && response.data) {
-        const commentsData = Array.isArray(response.data) ? response.data.map((comment: any) => ({
-          id: comment.id,
-          user: {
-            username: comment.creator?.handle || 'Usuario Anónimo',
-            profileImage: comment.creator?.profileImage
-          },
-          content: comment.comment || comment.content,
-          createdAt: comment.createdAt,
-          likes: comment.likes || 0,
-          dislikes: comment.dislikes || 0,
-          userReaction: comment.userReaction || null,
-          // 🛑 DEJAMOS answers en [] si el endpoint principal no los trae
-          answers: [], 
-          answerCount: comment.answerCount || (comment.answers ? comment.answers.length : 0),
-          // 🆕 Inicializamos los estados de visualización
-          showAnswers: false, 
-          isAnswersLoading: false
-        })) : [];
+        const commentsData = Array.isArray(response.data) ? response.data.map((comment: any) => {
+            const profileImageUrl = comment.creator?.imageURl;
+            // 🛑 DEPURACIÓN: Imprime la URL del comentario principal
+            console.log(`[DEBUG AVATAR - COMMENT] URL recibida para ${comment.creator?.handle || 'Anónimo'}:`, profileImageUrl);
+
+            return {
+                id: comment.id,
+                user: {
+                    username: comment.creator?.handle || 'Usuario Anónimo',
+                    profileImage: profileImageUrl 
+                },
+                content: comment.comment || comment.content,
+                createdAt: comment.createdAt,
+                likes: comment.likes || 0,
+                dislikes: comment.dislikes || 0,
+                userReaction: comment.userReaction || null,
+                answers: [], 
+                answerCount: comment.answerCount || (comment.answers ? comment.answers.length : 0),
+                showAnswers: false, 
+                isAnswersLoading: false
+            };
+        }) : [];
         
         setComments(commentsData);
         setError(null);
@@ -257,9 +285,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
     Keyboard.dismiss();
   };
   
-  // 🆕 FUNCIÓN PARA MOSTRAR/OCULTAR Y CARGAR LAS RESPUESTAS
   const handleToggleAnswers = (comment: Comment) => {
-    // 1. Si ya están cargadas, simplemente las muestra u oculta localmente
     if (comment.answers && comment.answers.length > 0) {
         setComments(prev => 
             prev.map(c => 
@@ -269,7 +295,6 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
             )
         );
     } 
-    // 2. Si no están cargadas y hay respuestas que cargar, las carga
     else if (comment.answerCount && comment.answerCount > 0 && !comment.isAnswersLoading) {
         fetchAnswersForComment(comment.id);
     }
@@ -300,7 +325,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
       Keyboard.dismiss();
 
       if (parentCommentId) {
-        // ✅ Envío de respuesta a POST /answers
+        // Envío de respuesta
         await axios.post(
           `${API_URL}/answers`, 
           {
@@ -310,7 +335,7 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
           config
         );
         
-        // 🚀 Recargar SOLO las respuestas del comentario padre y mostrarlas
+        // Recargar respuestas y mostrarlas
         await fetchAnswersForComment(parentCommentId, true); 
 
       } else {
@@ -331,7 +356,8 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
           id: newCommentData.id,
           user: {
             username: newCommentData.creator?.handle || 'Tú', 
-            profileImage: newCommentData.creator?.profileImage
+            // ✅ Mapeamos la URL del perfil desde la propiedad 'imageURl'
+            profileImage: newCommentData.creator?.imageURl 
           },
           content: newCommentData.content || newCommentData.comment,
           createdAt: newCommentData.createdAt || new Date().toISOString(),
@@ -471,14 +497,9 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
             <View className="flex-col w-full mb-4 px-4 py-2 border-b border-b-gray-800" key={item.id}>
               {/* Contenido del Comentario Principal */}
               <View className="flex-row items-start">
-                {item.user?.profileImage ? (
-                  <Image
-                    source={{ uri: item.user.profileImage }}
-                    style={{ width: 44, height: 44, borderRadius: 22, marginRight: 10 }}
-                  />
-                ) : (
-                  <Ionicons name="person-circle-outline" size={44} color="white" style={{ marginRight: 10 }} />
-                )}
+                
+                <ProfileAvatar imageUrl={item.user.profileImage} size={44} />
+                
                 <View className="flex-1">
                   <Text className="text-lg text-green-400">{item.user?.username || 'Usuario'}</Text>
                   <Text className="text-white text-base">{item.content}</Text>
@@ -519,7 +540,9 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
                       <View style={{ marginTop: 10, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: '#444' }}>
                           {item.answers.map((answer) => (
                               <View key={answer.id} style={{ marginBottom: 8, flexDirection: 'row', alignItems: 'flex-start' }}>
-                                  <Ionicons name="arrow-undo-sharp" size={14} color="#666" style={{ marginTop: 2, marginRight: 5 }} />
+                                  
+                                  <ProfileAvatar imageUrl={answer.user.profileImage} size={28} />
+                                  
                                   <View style={{ flex: 1 }}>
                                       <Text style={{ color: '#ccc', fontSize: 14 }}>
                                           <Text style={{ fontWeight: 'bold', color: '#6AA84F' }}>
@@ -575,11 +598,6 @@ export default function CommentsComponent({ videoId, onClose }: CommentsComponen
 
         {/* CAJA DE TEXTO */}
         <View style={{ flexDirection: 'row', alignItems: 'center', padding: 10 }}>
-            <Image
-            style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }}
-            source={icon}
-            />
-
             <View style={{ flex: 1, position: "relative" }}>
             <TextInput
                 ref={inputRef}

@@ -65,7 +65,7 @@ export default function Register({ navigation }: any) {
 
       navigation.reset({
         index: 0,
-        routes: [{ name: 'BottomTap' }]
+        routes: [{ name: 'Login' }]
       });
 
     } catch (err: any) {

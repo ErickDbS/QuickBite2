@@ -4,18 +4,17 @@
     "slug": "QuickBite",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo quickBite.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/logo quickBite.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.QuickBite",
-
       "infoPlist": {
         "NSCameraUsageDescription": "Necesitamos acceder a la cámara para grabar videos.",
         "NSPhotoLibraryUsageDescription": "Permite que QuickBite acceda a tu galería para subir videos y fotos.",
@@ -27,7 +26,8 @@
               "NSIncludesSubdomains": true
             }
           }
-        }
+        },
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -37,7 +37,6 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.anonymous.QuickBite",
-      
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -48,6 +47,12 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1ed85cf5-6d99-45ae-8310-6e478a6d784d"
+      }
+    },
+    "owner": "sonericks"
   }
 }

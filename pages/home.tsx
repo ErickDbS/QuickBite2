@@ -1,8 +1,8 @@
-import { View, Text, TouchableWithoutFeedback, Animated, Dimensions, Alert, Platform, TouchableOpacity } from "react-native";
+import { View, Text, TouchableWithoutFeedback, Animated, Dimensions, Alert, Platform, TouchableOpacity, Image } from "react-native";
 import FYP from "../components/fyp";
 import { Ionicons } from "@expo/vector-icons";
 import CommentsComponent from "../components/commentsComponent";
-import { useRef, useState, useCallback, useMemo } from "react";
+import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { useIsFocused } from "@react-navigation/native";
 import axios from "axios";
 import * as SecureStore from 'expo-secure-store';
@@ -27,6 +27,7 @@ export default function Home({ navigation }: HomeScreenProps) {
   const [visible, setVisible] = useState(false);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null); // 🚨 NUEVO ESTADO
+  const [creatorImage, setCreatorImage] = useState<string | null>(null); // Imagen del usuario para el icono de perfil
   const [commentsCount, setCommentsCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
   const [userHasLiked, setUserHasLiked] = useState(false);
@@ -133,23 +134,52 @@ export default function Home({ navigation }: HomeScreenProps) {
       : `${API_URL}/videos/feed/followed`;
   }, [activeTab, API_URL]);
 
+  // 🚨 Función para obtener la imagen del creador
+  const fetchCreatorProfile = useCallback(async (userId: string | null) => {
+    if (!userId) {
+      setCreatorImage(null);
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await axios.get(`${API_URL}/user/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.status === 200) {
+        const profile = res.data;
+        setCreatorImage(profile.imageURl || null);
+      }
+    } catch (error) {
+      console.error("Error fetching creator profile:", error);
+      setCreatorImage(null);
+    }
+  }, []);
+
+  // 🚨 Cada vez que cambia el creatorId, actualizar la imagen
+  useEffect(() => {
+    fetchCreatorProfile(selectedCreatorId);
+  }, [selectedCreatorId, fetchCreatorProfile]);
+
   return (
     <View className="flex-1">
       <View className="flex-1 bg-gray-900">
         
         {/* Pasar la URL y la pestaña activa a FYP */}
         <FYP 
-          key={activeTab} // Usar key para forzar el remount y reset del estado interno de FYP al cambiar de pestaña
+          key={activeTab} 
           feedUrl={feedUrl}
           feedType={activeTab}
-          onVideoSelect={handleVideoSelect} // Usa la función con el creatorId
+          onVideoSelect={handleVideoSelect}
           onSetFypUpdateLikes={handleSetFypUpdateLikes}
         />
 
         <View className="absolute top-16 left-0 right-0 z-10" style={{ paddingTop: Platform.OS === 'ios' ? 0 : 10 }}>
           <View className="flex-row justify-center gap-10">
             
-            {/* Botón Siguiendo */}
             <TouchableOpacity onPress={() => setActiveTab('FOLLOWING')}>
                 <Text 
                     className={`text-lg text-white font-bold ${activeTab === 'FOLLOWING' ? 'opacity-100' : 'opacity-60'}`}
@@ -158,7 +188,6 @@ export default function Home({ navigation }: HomeScreenProps) {
                 </Text>
             </TouchableOpacity>
 
-            {/* Botón Para Ti */}
             <TouchableOpacity onPress={() => setActiveTab('FOR_YOU')}>
                 <Text 
                     className={`text-lg text-white font-bold ${activeTab === 'FOR_YOU' ? 'opacity-100' : 'opacity-60'}`}
@@ -171,19 +200,25 @@ export default function Home({ navigation }: HomeScreenProps) {
 
         <View className="absolute right-4 bottom-24 gap-6 pb-20">
           
-           {/* Profile Button */}
+          {/* Profile Button */}
           <View className="items-center">
             <TouchableWithoutFeedback 
               onPress={() => {
                 if (selectedCreatorId) {
-                  // 🚨 CRÍTICO: Navegar a UserProfile con el ID del creador
                   navigation.navigate("UserProfile", { userId: selectedCreatorId });
                 } else {
-                    Alert.alert("Error", "No se ha seleccionado un video para ver su perfil.");
+                  Alert.alert("Error", "No se ha seleccionado un video para ver su perfil.");
                 }
               }}
             >
-              <Ionicons name="person-circle-outline" size={34} color="white" />
+              {creatorImage ? (
+                <Image
+                  source={{ uri: `${creatorImage}?t=${new Date().getTime()}` }} 
+                  className="w-8 h-8 rounded-full border-2 border-white"
+                />
+              ) : (
+                <Ionicons name="person-circle-outline" size={34} color="white" />
+              )}
             </TouchableWithoutFeedback>
             <Text className="text-white text-xs">Perfil</Text>
           </View>
@@ -215,13 +250,6 @@ export default function Home({ navigation }: HomeScreenProps) {
             </TouchableWithoutFeedback>
             <Text className="text-white text-xs">{commentsCount}</Text>
           </View>
-
-          {/* Share Button */}
-          <View className="items-center">
-            <Ionicons name="share-social-outline" size={34} color="white" />
-            <Text className="text-white text-xs">Compartir</Text>
-          </View>
-
         </View>
       </View>
 

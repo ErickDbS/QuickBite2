@@ -17,26 +17,25 @@ import axios from "axios";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons } from "@expo/vector-icons";
 import VideoGrid from "../components/videoGrid"; 
-import FollowListModal from "../components/followModal"; // Importación del modal
+import FollowListModal from "../components/followModal"; 
 
 const userImgPlaceholder = require("../assets/user.png"); 
 const API_URL = process.env.EXPO_PUBLIC_AWS_API_URL;
 const { height } = Dimensions.get("window");
 
-// Interfaz para tipado del usuario externo
+// Interfaz usando el nombre de la propiedad tal cual viene de tu API (imageURl)
 interface ExternalUser {
   id: string;
   alias: string;
   handle: string;
-  description: string;
-  image: string | null;
+  description?: string;
+  imageURl: string | null; // <-- Propiedad clave
   followingCount: number;
   followersCount: number;
   likes: number; 
   videos: any[]; 
 }
 
-// Interfaz para los parámetros de la ruta
 interface UserProfileRouteParams {
   userId: string; 
 }
@@ -62,7 +61,6 @@ export default function UserProfile({ navigation }: any) {
     }
   }, []);
 
-  // Función interna para verificar el estado de seguimiento (persistencia)
   const checkFollowStatus = useCallback(async (token: string, targetUserId: string) => {
     try {
       const res = await axios.get(`${API_URL}/user/following`, {
@@ -70,8 +68,6 @@ export default function UserProfile({ navigation }: any) {
       });
 
       const followedUsers = res.data; 
-      
-      // Asumiendo que res.data es un array de usuarios seguidos (a pesar de la captura de API)
       if (Array.isArray(followedUsers)) {
         const isCurrentlyFollowing = followedUsers.some(
           (followedUser: any) => followedUser.id === targetUserId
@@ -82,8 +78,7 @@ export default function UserProfile({ navigation }: any) {
       console.error("Error checking follow status:", error);
       setIsFollowing(false);
     }
-  }, [API_URL]);
-
+  }, []);
 
   const getUserProfile = useCallback(async () => {
     if (!userId) {
@@ -103,14 +98,11 @@ export default function UserProfile({ navigation }: any) {
       }
       
       const profileRequest = axios.get(`${API_URL}/user/${userId}`, {
-          headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       const checkStatusPromise = checkFollowStatus(token, userId);
 
-      const [profileRes] = await Promise.all([
-         profileRequest, 
-         checkStatusPromise 
-      ]);
+      const [profileRes] = await Promise.all([profileRequest, checkStatusPromise]);
 
       if (profileRes.status === 200 || profileRes.status === 201) {
         const userData: ExternalUser = profileRes.data;
@@ -124,7 +116,7 @@ export default function UserProfile({ navigation }: any) {
     } finally {
       setLoading(false);
     }
-  }, [userId, getToken, checkFollowStatus, API_URL]);
+  }, [userId, getToken, checkFollowStatus]);
 
   useEffect(() => {
     getUserProfile();
@@ -193,6 +185,9 @@ export default function UserProfile({ navigation }: any) {
     );
   }
 
+  // 🛑 Eliminamos la normalización y el parámetro de caché, que eran innecesarios o complicaban la URL
+  const finalImageUrl = user.imageURl; 
+
   return (
     <View className="flex-1 bg-black">
       <ScrollView className="flex-1 bg-gray-900">
@@ -210,10 +205,11 @@ export default function UserProfile({ navigation }: any) {
 
         <View className="flex-1 pt-20 mt-20">
           <View>
-            <Image 
+              <Image 
                 className="w-24 h-24 rounded-full mx-auto bg-slate-700" 
-                source={user.image ? { uri: user.image } : userImgPlaceholder} 
-            />
+                // ✅ Usamos la propiedad imageURl directamente
+                source={finalImageUrl ? { uri: finalImageUrl } : userImgPlaceholder} 
+              />
             <Text className="text-white text-center pt-4 italic">
               {user?.handle}
             </Text>
@@ -252,12 +248,6 @@ export default function UserProfile({ navigation }: any) {
                 {isFollowing ? 'Siguiendo' : 'Seguir'}
               </Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity>
-              <Text className="text-white text-md bg-gray-600 rounded-lg p-3 font-bold w-[3rem] text-center">
-                <Ionicons name="ellipsis-horizontal-circle-outline" size={20} color="white" />
-              </Text>
-            </TouchableOpacity>
           </View>
 
           {/* Descripción */}
@@ -289,10 +279,9 @@ export default function UserProfile({ navigation }: any) {
         </View>
       </ScrollView>
 
-      {/* 🚨 Corrección de Anidación: Renderizar solo si es visible */}
       {isModalVisible && (
           <FollowListModal
-              isVisible={true} // Siempre true, el padre controla la existencia
+              isVisible={true} 
               onClose={() => setIsModalVisible(false)}
               type={modalType}
               userId={userId} 

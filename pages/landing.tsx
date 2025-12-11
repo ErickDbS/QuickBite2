@@ -1,14 +1,33 @@
+import axios from "axios";
+import { useState } from "react";
 import {
     ScrollView,
     View,
     Text,
     ImageBackground,
     TouchableOpacity,
+    Alert,
 } from "react-native";
 
 const image = require("../assets/landing-back.png");
 
 const Landing = ({ navigation }: any) => {
+    const [tip, setTip] = useState({})
+    const showTip = async () => {
+        try {
+            const tip = await axios.get(`${process.env.EXPO_PUBLIC_TIP}`)
+            const data = tip.data
+            const firstTip = {
+                title: data.titulo,
+                content: data.contenido,
+                source: data.fuente
+            }
+            setTip(firstTip)
+            Alert.alert(firstTip.title, firstTip.content)
+        } catch (error) {
+            console.error("error obteniendo el tip", error)
+        }
+    }
     return (
         <ImageBackground
             className="flex flex-1 justify-center"
@@ -63,6 +82,15 @@ const Landing = ({ navigation }: any) => {
                             </Text>
                         </TouchableOpacity>
                     </View>
+
+                    <TouchableOpacity
+                        onPress={() => showTip()}
+                        className="mt-[1rem] rounded-2xl p-4 w-[50%] justify-center items-center mx-auto"
+                    >
+                        <Text className="text-lg text-green-400 font-bold">
+                            Tip del dia
+                        </Text>
+                    </TouchableOpacity>
                 </View>
             </ScrollView>
         </ImageBackground>

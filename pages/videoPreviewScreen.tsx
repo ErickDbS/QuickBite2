@@ -16,7 +16,7 @@ export default function VideoPreviewScreen({ route, navigation }: any) {
 
       <TouchableOpacity
         style={styles.nextBtn}
-        onPress={() => navigation.navigate("Upload", { uri })}
+        onPress={() => navigation.navigate("UploadVideoScreen", { uri })}
       >
         <Text style={styles.btnText}>Continuar</Text>
       </TouchableOpacity>

@@ -251,7 +251,7 @@ export default function App() {
                     component={VideoPreviewScreen}
                 />
                 <Stack.Screen
-                    name="Upload"
+                    name="UploadVideoScreen"
                     options={{ headerShown: false }}
                     component={UploadVideoScreen}
                 />

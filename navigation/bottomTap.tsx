@@ -34,6 +34,7 @@ export default function BottomTap() {
           tabBarLabel: "Inicio",
         }}
       />
+      
 
       <Tab.Screen
         name="Upload"
